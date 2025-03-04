@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const module = @import("module.zig");
+const simulate = @import("simulate.zig");
+
+
 const Options = struct {
     run_task1: bool = false,
     run_task2: bool = false,
