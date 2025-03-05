@@ -2,6 +2,7 @@ const std = @import("std");
 
 const module = @import("module.zig");
 const simulate = @import("simulate.zig");
+const cdag = @import("comb_dag.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -10,7 +11,7 @@ pub fn main() !void {
     var test_module = try module.Module.init(0, gpa.allocator());
     defer test_module.deinit();
 
-    var dag = try simulate.build_DAG(test_module, gpa.allocator());
+    var dag = try cdag.build_DAG(test_module, gpa.allocator());
     defer dag.deinit();
 }
 
