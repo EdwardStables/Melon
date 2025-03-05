@@ -46,7 +46,7 @@ pub const Comb = struct {
         self.outputs.deinit();
     }
 
-    pub fn evaluate(self: Comb, mod: Module) void {
+    pub fn evaluate(self: Comb, mod: *Module) void {
         //evaluate the procedure from the ir using the input copy
         _ = self;
         _ = mod;
@@ -85,7 +85,7 @@ pub const Proc = struct {
     }
 
 
-    pub fn evaluate(self: Proc, mod: Module) void {
+    pub fn evaluate(self: Proc, mod: *Module) void {
         //evaluate the procedure from the ir using the input copy
         _ = self;
         _ = mod;
@@ -159,10 +159,10 @@ pub const Module = struct {
     }
 
     // Make a copy of signals at the given time s.t. independent proc blocks can sample their values
-    pub fn sample_inputs(self: Module) !void {
+    pub fn sample_inputs(self: *Module) !void {
         self.input_copy.clearRetainingCapacity();
         for (self.signals.items) |signal| {
-            self.input_copy.append(signal);
+            try self.input_copy.append(signal);
         }
     }
 };

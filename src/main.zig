@@ -13,6 +13,12 @@ pub fn main() !void {
 
     var dag = try cdag.build_DAG(test_module, gpa.allocator());
     defer dag.deinit();
+
+    const result = try simulate.run(&test_module, dag, 10);
+
+    if (result == simulate.SimulationResult.FinishedSuccess) {
+        std.log.info("Simulation Completed Successfully", .{});
+    }
 }
 
 test {

@@ -11,23 +11,26 @@ const SimulationError = error {
     UnexpectedBehaviorError,
 };
 
-const SimulationResult = enum {
+pub const SimulationResult = enum {
     FinishedSuccess
 };
 
 
 // Continuously run the event loop until either no events are enabled, there is an error, or a finish command is set
-pub fn run(mod: module.Module, dag: DAG) SimulationError!SimulationResult {
-    while (true) {
+pub fn run(mod: *module.Module, dag: DAG, cycle_limit: u64) !SimulationResult {
+    for (0..cycle_limit) |cycle| {
+        std.log.info("Cycle {}", .{cycle});
         if (try run_cycle(mod, dag)) |result| {
             assert(result == SimulationResult.FinishedSuccess);
             std.debug.print("Got simulation finish event, stopping loop\n", .{});
             break;
         }
     }
+
+    return SimulationResult.FinishedSuccess;
 }
 
-pub fn run_cycle(mod: module.Module, dag: DAG) SimulationError!?SimulationResult {
+pub fn run_cycle(mod: *module.Module, dag: DAG) !?SimulationResult {
     //Copy the current state to independently evaluate procedures
     try mod.sample_inputs();
 
@@ -39,4 +42,8 @@ pub fn run_cycle(mod: module.Module, dag: DAG) SimulationError!?SimulationResult
     for (dag.comb_order.items) |comb_index| {
         mod.comb.items[comb_index].evaluate(mod);
     }
+
+    //TODO return FinishedSuccess if an end simulation directive is found
+
+    return null;
 }
