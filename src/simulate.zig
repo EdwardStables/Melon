@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const module = @import("module.zig");
 
 const SimulationError = error {
+    LoopedDAGError,
     SchedulerError,
     UnexpectedBehaviorError,
 };
@@ -51,6 +52,25 @@ test "make graph" {
     g.items[1].deinit();
     g.deinit();
 }
+
+test "self loop graph" {
+    var inp = try ArrayList(module.Comb).initCapacity(std.testing.allocator, 2);
+    defer inp.deinit();
+
+    try inp.append(try module.Comb.init(0, std.testing.allocator));
+    defer inp.items[0].deinit();
+
+    try inp.items[0].inputs.append(0);
+    try inp.items[0].outputs.append(0);
+
+    var g = try make_graph(inp, std.testing.allocator);
+    try std.testing.expectEqual(1, g.items.len);
+    try std.testing.expectEqual(1, g.items[0].items.len);
+    try std.testing.expect(g.items[0].items[0]);
+    g.items[0].deinit();
+    g.deinit();
+}
+
 const Graph = ArrayList(ArrayList(bool));
 fn make_graph(comb: ArrayList(module.Comb), alloc: std.mem.Allocator) !Graph {
     //TODO: Really this should be its own struct with fully contiguous memory. Nested ArrayList has extra indirection
@@ -69,8 +89,6 @@ fn make_graph(comb: ArrayList(module.Comb), alloc: std.mem.Allocator) !Graph {
     // Set fields to true when there is an edge
     for (comb.items, 0..) |mod1, i| {
         for (comb.items, 0..) |mod2, j| {
-            if (i==j) continue;
-            
             output_loop: for (mod1.outputs.items) |src| {
                 for (mod2.inputs.items) |snk| {
                     if (src == snk) {
@@ -83,6 +101,16 @@ fn make_graph(comb: ArrayList(module.Comb), alloc: std.mem.Allocator) !Graph {
     }
 
     return graph;
+}
+
+fn count_graph_edges(graph: Graph) u32 {
+    var count: u32 = 0;
+    for (graph.items) |row| {
+        for (row.items) |edge| {
+            if (edge) count += 1;
+        }
+    }
+    return count;
 }
 
 test "make S" {
@@ -146,6 +174,17 @@ pub fn build_DAG(mod: module.Module, alloc: std.mem.Allocator) !DAG {
     }
 
     const table_size = mod.comb.items.len;
+    const self_edge = for (0..table_size) |i| {
+        if (graph.items[i].items[i]) {
+            break true;
+        }
+    } else blk: {
+        break :blk false;
+    };
+
+    if (self_edge) {
+        return error.LoopedDAGError;
+    }
 
     // Search throw graph to build S (nodes where there are no inputs in the graph)
     var S = try make_S_array(graph, alloc);
@@ -167,6 +206,11 @@ pub fn build_DAG(mod: module.Module, alloc: std.mem.Allocator) !DAG {
                 try S.append(@intCast(dest));
             }
         }
+    }
+
+    if (count_graph_edges(graph) > 0) {
+        L.deinit();
+        return error.LoopedDAGError;
     }
 
     assert(S.items.len == 0);
@@ -284,4 +328,22 @@ test "complex DAG" {
     defer dag.deinit();
 
     try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{comb3, comb4, comb1, comb2}, dag.comb_order.items);
+}
+
+test "looped DAG error" {
+    // --s1-->| comb1 |--s2-->
+    //     |->|         |
+    //     |-------------
+    var mod = try module.Module.init(0, std.testing.allocator);
+    defer mod.deinit();
+
+    const s1 = try mod.addSignal(1);
+    const s2 = try mod.addSignal(1);
+    const comb1 = try mod.addComb();
+
+    try mod.addCombInput(comb1, s1);
+    try mod.addCombInput(comb1, s2);
+    try mod.addCombOutput(comb1, s2);
+
+    try std.testing.expectError(error.LoopedDAGError, build_DAG(mod, std.testing.allocator));
 }
