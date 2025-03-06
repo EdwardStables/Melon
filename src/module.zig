@@ -55,14 +55,14 @@ pub const Comb = struct {
     outputs: ArrayList(SignalID), //Signals that this block drives
 
     //IR Representation
-    ir: IRBlock,
+    ir: ?IRBlock,
 
-    pub fn init(id: CombID, mod: *Module, alloc: std.mem.Allocator) !Comb {
+    pub fn init(id: CombID, alloc: std.mem.Allocator) !Comb {
         return .{
             .id = id,
             .inputs = ArrayList(SignalID).init(alloc),
             .outputs = ArrayList(SignalID).init(alloc),
-            .ir = try IRBlock.init(mod, Block{ .CombBlock = id }, alloc),
+            .ir = null,
         };
     }
 
@@ -72,7 +72,12 @@ pub const Comb = struct {
     }
 
     pub fn evaluate(self: *Comb, mod: *Module) void {
-        self.ir.execute(mod);
+        if (self.ir != null)
+            self.ir.?.execute(mod);
+    }
+
+    pub fn attachIR(self: *Comb, mod: *Module, alloc: std.mem.Allocator) void {
+        self.ir = try IRBlock.init(mod, Block{ .CombBlock = self.id }, alloc);
     }
 };
 
@@ -89,14 +94,14 @@ pub const Proc = struct {
     outputs: ArrayList(SignalID), //Signals that this block drives
 
     //IR Representation
-    ir: IRBlock,
+    ir: ?IRBlock,
 
-    pub fn init(id: ProcID, mod: *Module, alloc: std.mem.Allocator) !Proc {
+    pub fn init(id: ProcID, alloc: std.mem.Allocator) !Proc {
         return .{
             .id = id,
             .inputs = ArrayList(SignalID).init(alloc),
             .outputs = ArrayList(SignalID).init(alloc),
-            .ir = IRBlock.init(mod, Block{ .ProcBlock = id }, alloc),
+            .ir = null,
         };
     }
 
@@ -107,7 +112,11 @@ pub const Proc = struct {
 
     pub fn evaluate(self: *Proc, mod: *Module) void {
         //evaluate the procedure from the ir using the input copy
-        self.ir.execute(mod);
+        if (self.ir != null)
+            self.ir.?.execute(mod);
+    }
+    pub fn attachIR(self: *Comb, mod: *Module, alloc: std.mem.Allocator) void {
+        self.ir = try IRBlock.init(mod, Block{ .ProcBlock = self.id }, alloc);
     }
 };
 
@@ -148,13 +157,13 @@ pub const Module = struct {
 
     pub fn addComb(self: *Module) !CombID {
         const id: CombID = @intCast(self.comb.items.len);
-        try self.comb.append(try Comb.init(id, self, self.alloc));
+        try self.comb.append(try Comb.init(id, self.alloc));
         return id;
     }
 
     pub fn addProc(self: *Module) !ProcID {
         const id: ProcID = @intCast(self.proc.items.len);
-        try self.proc.append(try Proc.init(id, self, self.alloc));
+        try self.proc.append(try Proc.init(id, self.alloc));
         return id;
     }
 

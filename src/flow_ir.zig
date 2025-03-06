@@ -275,7 +275,8 @@ pub const IRBlock = struct {
     }
 
     fn set(self: Self, id: IRSignalID, val: u64) void {
-        self.signals.items[id].val = (@as(u64, 1) <<| self.signals.items[id].width) & val;
+        const mask = (@as(u64, 0) -% 1) >> @as(u6, @intCast(64 - self.signals.items[id].width));
+        self.signals.items[id].val = mask & val;
     }
 
     fn get(self: Self, id: IRSignalID) IRSignal {

@@ -21,8 +21,8 @@ test "make graph" {
     var mod = try module.Module.init(0, std.testing.allocator);
     defer mod.deinit();
 
-    try inp.append(try module.Comb.init(0, &mod, std.testing.allocator));
-    try inp.append(try module.Comb.init(1, &mod, std.testing.allocator));
+    try inp.append(try module.Comb.init(0, std.testing.allocator));
+    try inp.append(try module.Comb.init(1, std.testing.allocator));
     defer inp.items[0].deinit();
     defer inp.items[1].deinit();
 
@@ -55,7 +55,7 @@ test "self loop graph" {
     var mod = try module.Module.init(0, std.testing.allocator);
     defer mod.deinit();
 
-    try inp.append(try module.Comb.init(0, &mod, std.testing.allocator));
+    try inp.append(try module.Comb.init(0, std.testing.allocator));
     defer inp.items[0].deinit();
 
     try inp.items[0].inputs.append(0);
