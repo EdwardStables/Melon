@@ -4,9 +4,7 @@ const assert = std.debug.assert;
 
 const module = @import("module.zig");
 
-const DAGError = error {
-    LoopedDAGError
-};
+const DAGError = error{LoopedDAGError};
 
 pub const DAG = struct {
     comb_order: ArrayList(module.CombID), //Statically defined order to run combinational logic updates
@@ -20,8 +18,11 @@ test "make graph" {
     var inp = try ArrayList(module.Comb).initCapacity(std.testing.allocator, 2);
     defer inp.deinit();
 
-    try inp.append(try module.Comb.init(0, std.testing.allocator));
-    try inp.append(try module.Comb.init(1, std.testing.allocator));
+    var mod = try module.Module.init(0, std.testing.allocator);
+    defer mod.deinit();
+
+    try inp.append(try module.Comb.init(0, &mod, std.testing.allocator));
+    try inp.append(try module.Comb.init(1, &mod, std.testing.allocator));
     defer inp.items[0].deinit();
     defer inp.items[1].deinit();
 
@@ -33,12 +34,12 @@ test "make graph" {
     try inp.items[1].outputs.append(3);
 
     var g = try make_graph(inp, std.testing.allocator);
-    
+
     try std.testing.expectEqual(2, g.items.len);
     try std.testing.expectEqual(2, g.items[0].items.len);
     try std.testing.expectEqual(2, g.items[1].items.len);
     try std.testing.expect(!g.items[0].items[0]);
-    try std.testing.expect( g.items[0].items[1]);
+    try std.testing.expect(g.items[0].items[1]);
     try std.testing.expect(!g.items[1].items[0]);
     try std.testing.expect(!g.items[1].items[1]);
 
@@ -51,7 +52,10 @@ test "self loop graph" {
     var inp = try ArrayList(module.Comb).initCapacity(std.testing.allocator, 2);
     defer inp.deinit();
 
-    try inp.append(try module.Comb.init(0, std.testing.allocator));
+    var mod = try module.Module.init(0, std.testing.allocator);
+    defer mod.deinit();
+
+    try inp.append(try module.Comb.init(0, &mod, std.testing.allocator));
     defer inp.items[0].deinit();
 
     try inp.items[0].inputs.append(0);
@@ -119,20 +123,28 @@ test "make S" {
     //Therefore S should be A,B as neither have any incoming edges
 
     try g.append(ArrayList(bool).init(std.testing.allocator));
-    try g.items[0].append(false); try g.items[0].append(false); try g.items[0].append(false);
+    try g.items[0].append(false);
+    try g.items[0].append(false);
+    try g.items[0].append(false);
     try g.append(ArrayList(bool).init(std.testing.allocator));
-    try g.items[1].append(false); try g.items[1].append(false); try g.items[1].append(true);
+    try g.items[1].append(false);
+    try g.items[1].append(false);
+    try g.items[1].append(true);
     try g.append(ArrayList(bool).init(std.testing.allocator));
-    try g.items[2].append(false); try g.items[2].append(false); try g.items[2].append(false);
-    defer g.items[0].deinit(); defer g.items[1].deinit(); defer g.items[2].deinit();
+    try g.items[2].append(false);
+    try g.items[2].append(false);
+    try g.items[2].append(false);
+    defer g.items[0].deinit();
+    defer g.items[1].deinit();
+    defer g.items[2].deinit();
 
     var S = try make_S_array(g, std.testing.allocator);
     defer S.deinit();
-    try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{0,1}, S.items);
+    try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{ 0, 1 }, S.items);
 }
 
 fn make_S_array(graph: Graph, alloc: std.mem.Allocator) !ArrayList(module.CombID) {
-    var S =  ArrayList(module.CombID).init(alloc);
+    var S = ArrayList(module.CombID).init(alloc);
     const table_size = graph.items.len;
     for (0..table_size) |col| {
         for (0..table_size) |row| {
@@ -210,7 +222,7 @@ pub fn build_DAG(mod: module.Module, alloc: std.mem.Allocator) !DAG {
     assert(S.items.len == 0);
     assert(L.items.len == mod.comb.items.len);
 
-    return .{.comb_order=L};
+    return .{ .comb_order = L };
 }
 
 test "one item DAG" {
@@ -250,7 +262,7 @@ test "two item DAG" {
     var dag = try build_DAG(mod, std.testing.allocator);
     defer dag.deinit();
 
-    try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{comb1, comb2}, dag.comb_order.items);
+    try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{ comb1, comb2 }, dag.comb_order.items);
 }
 
 test "complex DAG" {
@@ -296,7 +308,7 @@ test "complex DAG" {
     var dag = try build_DAG(mod, std.testing.allocator);
     defer dag.deinit();
 
-    try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{comb3, comb4, comb1, comb2}, dag.comb_order.items);
+    try std.testing.expectEqualSlices(module.CombID, &[_]module.CombID{ comb3, comb4, comb1, comb2 }, dag.comb_order.items);
 }
 
 test "looped DAG error" {

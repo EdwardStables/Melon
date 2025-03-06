@@ -3,6 +3,7 @@ const std = @import("std");
 const module = @import("module.zig");
 const simulate = @import("simulate.zig");
 const cdag = @import("comb_dag.zig");
+const ir = @import("flow_ir.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
