@@ -71,9 +71,9 @@ pub const Comb = struct {
         self.outputs.deinit();
     }
 
-    pub fn evaluate(self: *Comb, mod: *Module) void {
+    pub fn evaluate(self: *Comb, mod: *Module) !void {
         if (self.ir != null)
-            self.ir.?.execute(mod);
+            try self.ir.?.execute(mod);
     }
 
     pub fn attachIR(self: *Comb, mod: *Module, alloc: std.mem.Allocator) void {
@@ -110,10 +110,10 @@ pub const Proc = struct {
         self.outputs.deinit();
     }
 
-    pub fn evaluate(self: *Proc, mod: *Module) void {
+    pub fn evaluate(self: *Proc, mod: *Module) !void {
         //evaluate the procedure from the ir using the input copy
         if (self.ir != null)
-            self.ir.?.execute(mod);
+            try self.ir.?.execute(mod);
     }
     pub fn attachIR(self: *Comb, mod: *Module, alloc: std.mem.Allocator) void {
         self.ir = try IRBlock.init(mod, Block{ .ProcBlock = self.id }, alloc);

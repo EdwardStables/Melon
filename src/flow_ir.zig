@@ -117,7 +117,7 @@ const IRStatement = struct {
         };
     }
 
-    pub fn execute(self: Self, block: *IRBlock) void {
+    pub fn execute(self: Self, block: *IRBlock) !void {
         const v1 = if (self.input1) |in1| block.get(in1) else null;
         const v2 = if (self.input2) |in2| block.get(in2) else null;
         switch (self.instr) {
@@ -134,6 +134,9 @@ const IRStatement = struct {
                 block.set(self.output.?, v1.?.val >> @as(u6, @intCast(v2.?.val)));
             },
             IRInstr.CONCAT => {
+                if (block.get(self.output.?).width != v1.?.width + v2.?.width) {
+                    return error.ConcatWidthMismatch;
+                }
                 block.set(self.output.?, (v1.?.val << @as(u6, @intCast(v2.?.width))) | v2.?.val);
             },
             IRInstr.AND => {
@@ -149,7 +152,7 @@ const IRStatement = struct {
                 block.set(self.output.?, ~v1.?.val);
             },
             IRInstr.AND_REDUCE => {
-                assert(block.get(self.output.?).width == 1);
+                if (block.get(self.output.?).width != 1) return error.ReductionOutputWidthNonOne;
                 for (0..v1.?.width) |ind| {
                     if ((1 & (v1.?.val >> @as(u6, @intCast(ind)))) == 0) {
                         block.set(self.output.?, 0);
@@ -160,7 +163,7 @@ const IRStatement = struct {
                 }
             },
             IRInstr.OR_REDUCE => {
-                assert(block.get(self.output.?).width == 1);
+                if (block.get(self.output.?).width != 1) return error.ReductionOutputWidthNonOne;
                 for (0..v1.?.width) |ind| {
                     if ((1 & (v1.?.val >> @as(u6, @intCast(ind)))) == 1) {
                         block.set(self.output.?, 1);
@@ -171,7 +174,7 @@ const IRStatement = struct {
                 }
             },
             IRInstr.XOR_REDUCE => {
-                assert(block.get(self.output.?).width == 1);
+                if (block.get(self.output.?).width != 1) return error.ReductionOutputWidthNonOne;
                 var count: usize = 0;
                 for (0..v1.?.width) |ind| {
                     if ((1 & (v1.?.val >> @as(u6, @intCast(ind)))) == 1) {
@@ -314,7 +317,7 @@ pub const IRBlock = struct {
     }
 
     /// Assume the signals have already been copied
-    pub fn execute(self: *Self, mod: *Module) void {
+    pub fn execute(self: *Self, mod: *Module) !void {
         //Update internal copies
         self.sync_from(switch (self.block) {
             .CombBlock => &mod.signals,
@@ -324,7 +327,7 @@ pub const IRBlock = struct {
         var index: usize = 0;
 
         while (index < self.statements.items.len) {
-            self.statements.items[index].execute(self);
+            try self.statements.items[index].execute(self);
             index += 1; //Increment as a PC
         }
 
@@ -332,15 +335,15 @@ pub const IRBlock = struct {
     }
 };
 
-test "Test Instrs" {
+fn test_combHarness(instr: IRInstr, in1_width: u8, in2_width: u8, out1_width: u8, in1_val: u64, in2_val: u64) !u64 {
     var mod = try Module.init(0, testing.allocator);
     defer mod.deinit();
 
     //Little two input block
     const comb = try mod.addComb();
-    const in1 = try mod.addSignal(4);
-    const in2 = try mod.addSignal(4);
-    const out1 = try mod.addSignal(4);
+    const in1 = try mod.addSignal(in1_width);
+    const in2 = try mod.addSignal(in2_width);
+    const out1 = try mod.addSignal(out1_width);
 
     try mod.addCombInput(comb, in1);
     try mod.addCombInput(comb, in2);
@@ -352,13 +355,82 @@ test "Test Instrs" {
     const ir_in1 = block.getIRSignalFromModuleSignal(in1) orelse unreachable;
     const ir_in2 = block.getIRSignalFromModuleSignal(in2) orelse unreachable;
     const ir_out1 = block.getIRSignalFromModuleSignal(out1) orelse unreachable;
+
     const args = [_]IRSignalID{ ir_out1, ir_in1, ir_in2 };
-    try block.addStatement(IRStatement.make(0, .ADD, &args, null));
+    try block.addStatement(IRStatement.make(0, instr, &args, null));
 
-    mod.signals.items[in1].val = module.SignalValue{ .Direct = 4 };
-    mod.signals.items[in2].val = module.SignalValue{ .Direct = 4 };
+    mod.signals.items[in1].val = module.SignalValue{ .Direct = in1_val };
+    mod.signals.items[in2].val = module.SignalValue{ .Direct = in2_val };
 
-    block.execute(&mod);
+    try block.execute(&mod);
 
-    try testing.expectEqual(8, mod.signals.items[out1].val.Direct);
+    return mod.signals.items[out1].val.Direct;
+}
+
+test "Test Add" {
+    try testing.expectEqual(8, test_combHarness(.ADD, 4, 4, 4, 4, 4)); //Just add
+    try testing.expectEqual(1, test_combHarness(.ADD, 4, 4, 4, 0xE, 3)); //Overflow on 4 bits
+}
+
+test "Test Sub" {
+    try testing.expectEqual(2, test_combHarness(.SUB, 4, 4, 4, 4, 2)); //Just sub
+    try testing.expectEqual(0xF, test_combHarness(.SUB, 4, 4, 4, 2, 3)); //Underflow on 4 bits
+}
+
+test "Test LSL" {
+    try testing.expectEqual(32, test_combHarness(.LSL, 8, 8, 8, 4, 3));
+    try testing.expectEqual(0, test_combHarness(.LSL, 4, 4, 4, 1, 4));
+}
+
+test "Test LSR" {
+    try testing.expectEqual(1, test_combHarness(.LSR, 8, 8, 8, 4, 2));
+    try testing.expectEqual(0, test_combHarness(.LSR, 4, 4, 4, 2, 2));
+}
+
+test "Test Concat" {
+    try testing.expectEqual(0xF5, test_combHarness(.CONCAT, 4, 4, 8, 0xF, 0x5));
+    try testing.expectError(error.ConcatWidthMismatch, test_combHarness(.CONCAT, 4, 3, 6, 0xF, 0x5));
+}
+
+test "Test AND" {
+    try testing.expectEqual(0x5, test_combHarness(.AND, 4, 4, 4, 0xF, 0x5));
+}
+
+test "Test OR" {
+    try testing.expectEqual(0xF, test_combHarness(.OR, 4, 4, 4, 0xA, 0x5));
+}
+
+test "Test XOR" {
+    try testing.expectEqual(0xC, test_combHarness(.XOR, 4, 4, 4, 0xB, 0x7));
+}
+
+test "Test INV" {
+    try testing.expectEqual(0x5, test_combHarness(.INV, 4, 4, 4, 0xA, 0));
+    try testing.expectEqual(0xF, test_combHarness(.INV, 4, 4, 4, 0, 0));
+    try testing.expectEqual(0x0, test_combHarness(.INV, 4, 4, 4, 0xF, 0));
+}
+
+test "Test AND_REDUCE" {
+    try testing.expectEqual(0, test_combHarness(.AND_REDUCE, 4, 4, 1, 0xA, 0));
+    try testing.expectEqual(1, test_combHarness(.AND_REDUCE, 4, 4, 1, 0xF, 0));
+    try testing.expectEqual(0, test_combHarness(.AND_REDUCE, 6, 4, 1, 0x2F, 0));
+    try testing.expectEqual(1, test_combHarness(.AND_REDUCE, 6, 4, 1, 0x3F, 0));
+    try testing.expectError(error.ReductionOutputWidthNonOne, test_combHarness(.AND_REDUCE, 4, 4, 2, 0, 0));
+}
+
+test "Test OR_REDUCE" {
+    try testing.expectEqual(0, test_combHarness(.OR_REDUCE, 4, 4, 1, 0x0, 0));
+    try testing.expectEqual(1, test_combHarness(.OR_REDUCE, 4, 4, 1, 0x1, 0));
+    try testing.expectEqual(1, test_combHarness(.OR_REDUCE, 6, 4, 1, 0x1, 0));
+    try testing.expectEqual(1, test_combHarness(.OR_REDUCE, 6, 4, 1, 0x3F, 0));
+    try testing.expectError(error.ReductionOutputWidthNonOne, test_combHarness(.OR_REDUCE, 4, 4, 2, 0, 0));
+}
+
+test "Test XOR_REDUCE" {
+    try testing.expectEqual(0, test_combHarness(.XOR_REDUCE, 4, 4, 1, 0x0, 0));
+    try testing.expectEqual(1, test_combHarness(.XOR_REDUCE, 4, 4, 1, 0x1, 0));
+    try testing.expectEqual(1, test_combHarness(.XOR_REDUCE, 6, 4, 1, 0x1, 0));
+    try testing.expectEqual(0, test_combHarness(.XOR_REDUCE, 6, 4, 1, 0x3F, 0));
+    try testing.expectEqual(0, test_combHarness(.XOR_REDUCE, 6, 4, 1, 0x15, 0));
+    try testing.expectError(error.ReductionOutputWidthNonOne, test_combHarness(.XOR_REDUCE, 4, 4, 2, 0, 0));
 }

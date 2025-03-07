@@ -8,6 +8,8 @@ const DAG = cdag.DAG;
 
 const SimulationError = error{
     SchedulerError,
+    ConcatWidthMismatch,
+    ReductionOutputWidthNonOne,
     UnexpectedBehaviorError,
 };
 
@@ -33,11 +35,11 @@ pub fn run_cycle(mod: *module.Module, dag: DAG) !?SimulationResult {
 
     //Evaluate all the procedures
     for (mod.proc.items, 0..) |_, i| {
-        mod.proc.items[i].evaluate(mod);
+        try mod.proc.items[i].evaluate(mod);
     }
 
     for (dag.comb_order.items) |comb_index| {
-        mod.comb.items[comb_index].evaluate(mod);
+        try mod.comb.items[comb_index].evaluate(mod);
     }
 
     //TODO return FinishedSuccess if an end simulation directive is found
