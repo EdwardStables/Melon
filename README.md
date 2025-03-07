@@ -47,8 +47,8 @@ signal [3] a;
 cont a = 0; # Error, 0 is a 1 bit signal and a is 3 bits
 cont a = 010; # Acceptable
 cont a = 3; # Error, only binary literals can be given without width
-cont a = d3; # Acceptable
-cont a = d10; # Error, literal too big for destination
+cont a = 'd3; # Acceptable
+cont a = 'd10; # Error, literal too big for destination
 cont a = 3'h5; # Acceptable, exact width matches
 cont a = 3'hF; # Error, width too small for literal value
 cont a = 2'h3; # Error, literal is 2 bits and a is 3 bits
@@ -90,10 +90,10 @@ All logic is organised into modules. Modules have input and output ports, and de
 
 ```
 module my_module
-(
+[
 +clk,   #Clock listed after module name
 -resetn #Reset after this
-)
+]
 (
     input [5] data_up,
     input valid_up,
@@ -123,4 +123,4 @@ my_module i_my_module_instance(
 Clock and resets can be connected explicitly, only intended for use if the naming scheme changes as normal signals do not drive clocks or resets.
 
 ```
-my_module (clk,renamed_resetn) i_my_module_instance (...);
+my_module [clk,renamed_resetn] i_my_module_instance (...);
