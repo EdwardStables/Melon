@@ -40,11 +40,11 @@ cont a = b && c; # Error, && for logical and doesn't exist
 cont a = if b and c {b} else {c} # Logic and uses the and keyword and can only be used in specific circumstances. Note the use of if as an expression
 ```
 
-Literal values can be provided in binary, decimal, or hex. b, h, d signifiers must be used, unless a binary literal of exact width is given.
+Literal values can be provided in binary, decimal, or hex. b, h, d signifiers must be used.
 Literals do not need to be given a width in many cases (values too large will not compile, otherwise they will be 0-extended), but verilog-style widths can be set. If a width is set that does not match the destination width then it will error.
 ```
 signal [3] a;
-cont a = 0; # Error, 0 is a 1 bit signal and a is 3 bits
+cont a = 'b0; # Error, 0 is a 1 bit signal and a is 3 bits
 cont a = 010; # Acceptable
 cont a = 3; # Error, only binary literals can be given without width
 cont a = 'd3; # Acceptable
