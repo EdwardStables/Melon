@@ -271,6 +271,7 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
     };
 
     var state: State = .Idle;
+    var multi_char_token_start_index: u32 = 0;
 
     for (buffer, 0..) |c, i| {
         const c_n = if (i < buffer.len - 1) buffer[i + 1] else null;
@@ -302,20 +303,26 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
         const sct = isSingleCharacterToken(c);
         const td = isTokenDelimiter(c);
 
-        const multi_char_token_start_index = if (!sct and !td) blk: {
-            state = .InToken;
-            break :blk i;
-        } else 0;
+        if (state != .InToken) {
+            if (!sct and !td) {
+                state = .InToken;
+                multi_char_token_start_index = @intCast(i);
+            } else {
+                multi_char_token_start_index = 0;
+            }
+        } 
 
         if (state == .InToken and (sct or td or last_char)) {
             const end = if (sct or td) i else i + 1;
             const mct = try readMultiCharToken(buffer[multi_char_token_start_index..end]);
+
             switch (mct.token) {
                 .VL_variable => try tokens.addVariable(line, multi_char_token_start_index, mct.variable.?),
                 .VL_integer_literal => try tokens.addLiteral(line, multi_char_token_start_index, mct.value.?),
                 else => try tokens.addToken(line, multi_char_token_start_index, mct.token),
             }
             state = .Idle;
+            multi_char_token_start_index = 0;
         }
 
         //Process single character tokens, as well as ++ and == which are more easily treated as special cases
@@ -325,8 +332,8 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
             switch (c) {
                 '{' => try tokens.addToken(line, col, .SS_open_brace),
                 '}' => try tokens.addToken(line, col, .SS_close_brace),
-                '[' => try tokens.addToken(line, col, .SS_open_brace),
-                ']' => try tokens.addToken(line, col, .SS_close_brace),
+                '[' => try tokens.addToken(line, col, .SS_open_bracket),
+                ']' => try tokens.addToken(line, col, .SS_close_bracket),
                 ';' => try tokens.addToken(line, col, .SS_semi_colon),
                 '=' => {
                     if (c_n != null and c_n.? == '=') {
@@ -442,9 +449,87 @@ test "MultiCharTokeniser: variables" {
     try testing.expectError(error.UnknownTokenError, readMultiCharToken("_var_with_!_bad_char"));
 }
 
-test "Tokeniser: single keywords" {
+test "Tokeniser: single keyword" {
     const inp = "module";
-    const exp = [_]Token{.KW_module};
+    const exp_tok = [_]Token{.KW_module};
+    const exp_var = [_]?[]const u8{null};
+    const exp_val = [_]?IntegerWithWidth{null};
+
     var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-    try testing.expectEqualSlices(Token, &exp, tk.tokens.items);
+
+    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
+    try testing.expectEqualSlices(?[]const u8, &exp_var, tk.variable_values.items);
+    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
+}
+
+test "Tokeniser: multiple keywords" {
+    const inp = "module input   output signal     proc comb";
+    
+    const exp_tok = [_]Token{.KW_module, .KW_input, .KW_output, .KW_signal, .KW_proc, .KW_comb};
+    const exp_var = [_]?[]const u8{null,null,null,null,null,null};
+    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null};
+
+    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
+
+    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
+    try testing.expectEqualSlices(?[]const u8, &exp_var, tk.variable_values.items);
+    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
+}
+
+fn expectEqualStringSlice(expected: []const ?[]const u8, actual: []const ?[]const u8) !void {
+    if (expected.len != actual.len) {
+        std.debug.print("Length mismatch: expected {} found {}\n", .{expected.len, actual.len});
+        return error.TestExpectedEqual;
+    }
+
+    for (expected, actual, 0..) |e,a,i| {
+        if (e == null and a == null) continue;
+
+        if (e == null) {
+            std.debug.print("Value mismatch at index {}. Expected null but found {s}\n", .{i, a.?});
+            return error.TestExpectedEqual;
+        }
+        if (a == null) {
+            std.debug.print("Value mismatch at index {}. Expected {s} but found null\n", .{i, e.?});
+            return error.TestExpectedEqual;
+        }
+
+        testing.expectEqualStrings(e.?, a.?) catch |err| {
+            std.debug.print("String mismatch at index {}\n", .{i});
+            return err;
+        };
+    }
+}
+
+test "Tokeniser: mix of tokens" {
+    const inp = "module {signal ['d1] abc;}";
+    
+    const exp_tok = [_]Token{.KW_module, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
+    const exp_var = [_]?[]const u8{null,null,null,null,null,null,"abc",null,null};
+    const exp_val = [_]?IntegerWithWidth{null,null,null,null,.{.val=1,.width=1},null,null,null,null};
+
+    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
+
+    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
+    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
+    try expectEqualStringSlice(&exp_var, tk.variable_values.items);
+}
+
+test "Tokeniser: mix of tokens and newlines/comments" {
+    const inp = 
+\\module modmod { #module is called modmod
+\\    # We need to modify the syntax to not require widthed integers in signals
+\\    signal ['d1] abc;
+\\};
+;
+    
+    const exp_tok = [_]Token{.KW_module, .VL_variable, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
+    const exp_var = [_]?[]const u8{null,"modmod",null,null,null,null,null,"abc",null,null};
+    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,.{.val=1,.width=1},null,null,null,null};
+
+    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
+
+    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
+    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
+    try expectEqualStringSlice(&exp_var, tk.variable_values.items);
 }
