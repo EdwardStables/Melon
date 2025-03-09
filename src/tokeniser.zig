@@ -224,7 +224,7 @@ fn readLiteralToken(filename: []const u8, trial_token: []const u8, line: usize, 
     if (width == null) {
         width = required_width;
     } else if (width.? < required_width) {
-        log.err("Value {} requires signal width of {}, but width was specified as {}. At {s}:{}:{}", .{ val, required_width, width.?, filename, line, col - trial_token.len + value_start });
+        log.err("Value {} requires signal width of {}, but width was specified as {}. At {s}:{}:{}", .{ val, required_width, width.?, filename, line, start_col + value_start });
         return error.LiteralWidthError;
     }
 
@@ -392,6 +392,7 @@ test "Binary parsing" {
     //Invalid values
     testing.log_level = .err;
     try testing.expectError(error.InvalidCharacter, readLiteralToken(nm, "10'b00201", 0, 8));
+    try testing.expectError(error.LiteralWidthError, readLiteralToken(nm, "3'b1111", 0, 6));
 }
 
 test "Decimal parsing" {
@@ -404,6 +405,7 @@ test "Decimal parsing" {
     //Invalid values
     testing.log_level = .err;
     try testing.expectError(error.InvalidCharacter, readLiteralToken(nm, "10'd00f01", 0, 8));
+    try testing.expectError(error.LiteralWidthError, readLiteralToken(nm, "3'd8", 0, 3));
 }
 
 test "Hex parsing" {
@@ -412,4 +414,19 @@ test "Hex parsing" {
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x109, .width = 9 }, readLiteralToken(nm, "'h109", 0, 4));
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x123, .width = 9 }, readLiteralToken(nm, "'h0123", 0, 5));
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x0321, .width = 16 }, readLiteralToken(nm, "16'h0321", 0, 7));
+    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x0321, .width = 10 }, readLiteralToken(nm, "10'h321", 0, 7));
+
+    //Invalid values
+    testing.log_level = .err;
+    try testing.expectError(error.InvalidCharacter, readLiteralToken(nm, "10'h00fkj", 0, 8));
+    try testing.expectError(error.LiteralWidthError, readLiteralToken(nm, "3'hF", 0, 3));
+}
+
+test "Malformed structure errors" {
+    //Invalid values
+    const nm = "filename";
+    testing.log_level = .err;
+    try testing.expectError(error.MalformedToken, readLiteralToken(nm, "10h3ff", 0, 5));
+    try testing.expectError(error.MalformedToken, readLiteralToken(nm, "1d'h3ff", 0, 6));
+    try testing.expectError(error.MalformedToken, readLiteralToken(nm, "10'3ff", 0, 5));
 }
