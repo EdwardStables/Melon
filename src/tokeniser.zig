@@ -73,63 +73,51 @@ const Location = struct {
     column: usize,
 };
 
-const ValuedToken = struct {
-    token: Token,
-    variable_index: ?usize,
-    integer_literal_index: ?usize,
-    location: Location,
-};
-
 const TokenisedBuffer = struct {
-    tokens: ArrayList(ValuedToken),
-    variable_values: ArrayList([]u8),
-    integer_literal_values: ArrayList(IntegerWithWidth),
+    tokens: ArrayList(Token),
+    locations: ArrayList(Location),
+    variable_values: ArrayList(?[]const u8),
+    integer_literal_values: ArrayList(?IntegerWithWidth),
 
     const Self = @This();
 
     fn init(alloc: std.mem.Allocator) Self {
         return .{
-            .tokens = ArrayList(ValuedToken).init(alloc),
-            .variable_values = ArrayList([]u8).init(alloc),
-            .integer_literal_values = ArrayList(IntegerWithWidth).init(alloc),
+            .tokens = ArrayList(Token).init(alloc),
+            .locations = ArrayList(Location).init(alloc),
+            .variable_values = ArrayList(?[]const u8).init(alloc),
+            .integer_literal_values = ArrayList(?IntegerWithWidth).init(alloc),
         };
     }
 
     fn deinit(self: Self) void {
         self.tokens.deinit();
+        self.locations.deinit();
         self.variable_values.deinit();
         self.integer_literal_values.deinit();
     }
 
-    fn addToken(self: Self, line: usize, column: usize, token: Token) !void {
+    fn addToken(self: *Self, line: usize, column: usize, token: Token) !void {
         if (token == .VL_variable or token == .VL_integer_literal)
             return error.InternalTokeniserError;
-        self.tokens.append(.{
-            .token = token,
-            .variable_index = null,
-            .integer_literal_index = null,
-            .location = .{ .line = line, .column = column },
-        });
+        try self.tokens.append(token);
+        try self.locations.append(.{ .line = line, .column = column });
+        try self.variable_values.append(null);
+        try self.integer_literal_values.append(null);
     }
 
-    fn addVariable(self: Self, line: usize, column: usize, variable: []u8) !void {
-        self.tokens.append(.{
-            .token = .VL_variable,
-            .variable_index = self.variable_values.items.len,
-            .integer_literal_index = null,
-            .location = .{ .line = line, .column = column },
-        });
-        self.variable_values.append(variable);
+    fn addVariable(self: *Self, line: usize, column: usize, variable: []const u8) !void {
+        try self.tokens.append(.VL_variable);
+        try self.locations.append(.{ .line = line, .column = column });
+        try self.variable_values.append(variable);
+        try self.integer_literal_values.append(null);
     }
 
-    fn addLiteral(self: Self, line: usize, column: usize, literal: u64, width: u8) !void {
-        self.tokens.append(.{
-            .token = .VL_variable,
-            .variable_index = null,
-            .integer_literal_index = self.integer_literal_values.items.len,
-            .location = .{ .line = line, .column = column },
-        });
-        self.variable_values.append(.{ .val = literal, .width = width });
+    fn addLiteral(self: *Self, line: usize, column: usize, value: IntegerWithWidth) !void {
+        try self.tokens.append(.VL_integer_literal);
+        try self.locations.append(.{ .line = line, .column = column });
+        try self.variable_values.append(null);
+        try self.integer_literal_values.append(value);
     }
 };
 
@@ -231,26 +219,30 @@ fn readLiteralToken(filename: []const u8, trial_token: []const u8, line: usize, 
     return .{ .val = val, .width = width orelse unreachable };
 }
 
-fn readMultiCharToken(trial_token: []u8, line: usize, col: usize, token_buffer: *TokenisedBuffer) !void {
-    const keywords = [_][]u8{ "signal", "proc", "comb", "input", "output", "module" };
-    const tokens = [_]Token{ .KW_module, .KW_input, .KW_output, .KW_signal, .KW_proc, .KW_comb };
+const MultiCharToken = struct {
+    token: Token,
+    variable: ?[]const u8,
+    value: ?IntegerWithWidth,
+};
+
+fn readMultiCharToken(trial_token: []const u8, line: usize, col: usize) !MultiCharToken {
+    const keywords = [_][]const u8{ "signal", "proc", "comb", "input", "output", "module" };
+    const tokens = [_]Token{ .KW_signal, .KW_proc, .KW_comb, .KW_input, .KW_output, .KW_module};
     assert(keywords.len == tokens.len); //Make sure we don't make an error while editing
 
     const filename = "somefilename.txt";
 
     for (keywords, tokens) |kwd, tk| {
         if (std.mem.eql(u8, trial_token, kwd)) {
-            token_buffer.addToken(line, col - kwd.len, tk);
-            return;
+            return .{.token=tk, .variable=null, .value=null};
         }
     }
 
     //number
     //Starts with a number (value or width) or apostrophe
-    if (trial_token == '\'' or (trial_token[0] >= '0' and trial_token[0] <= '9')) {
+    if (trial_token[0] == '\'' or (trial_token[0] >= '0' and trial_token[0] <= '9')) {
         const vww = try readLiteralToken(filename, trial_token, line, col);
-        token_buffer.addLiteral(line, col, vww.val, vww.width);
-        return;
+        return .{.token=.VL_integer_literal, .variable=null, .value=vww};
     }
 
     //some variable
@@ -265,10 +257,10 @@ fn readMultiCharToken(trial_token: []u8, line: usize, col: usize, token_buffer: 
         return error.UnknownTokenError;
     }
 
-    token_buffer.addVariable(line, col - trial_token.len, trial_token);
+    return .{.token=.VL_variable, .variable=trial_token, .value=null};
 }
 
-pub fn tokenise(buffer: []u8, alloc: std.mem.Allocator) !TokenisedBuffer {
+pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer {
     var tokens = TokenisedBuffer.init(alloc);
 
     var line: usize = 0;
@@ -282,7 +274,6 @@ pub fn tokenise(buffer: []u8, alloc: std.mem.Allocator) !TokenisedBuffer {
     };
 
     var state: State = .Idle;
-    var multi_char_token_start_index = 0;
 
     for (buffer, 0..) |c, i| {
         const c_n = if (i < buffer.len - 1) buffer[i + 1] else null;
@@ -314,14 +305,19 @@ pub fn tokenise(buffer: []u8, alloc: std.mem.Allocator) !TokenisedBuffer {
         const sct = isSingleCharacterToken(c);
         const td = isTokenDelimiter(c);
 
-        if (!sct and !td) {
+        const multi_char_token_start_index = if (!sct and !td) blk: {
             state = .InToken;
-            multi_char_token_start_index = i;
-        }
+            break :blk i;
+        } else 0;
 
         if (state == .InToken and (sct or td or last_char)) {
             const end = if (sct or td) i else i + 1;
-            try readMultiCharToken(buffer[multi_char_token_start_index..end], line, col, &tokens);
+            const mct = try readMultiCharToken(buffer[multi_char_token_start_index..end], line, col);
+            switch (mct.token) {
+                .VL_variable => try tokens.addVariable(line, multi_char_token_start_index, mct.variable.?),
+                .VL_integer_literal => try tokens.addLiteral(line, multi_char_token_start_index, mct.value.?),
+                else => try tokens.addToken(line, multi_char_token_start_index, mct.token),
+            }
             state = .Idle;
         }
 
@@ -356,9 +352,8 @@ pub fn tokenise(buffer: []u8, alloc: std.mem.Allocator) !TokenisedBuffer {
                 '|' => try tokens.addToken(line, col, .OP_or),
                 '^' => try tokens.addToken(line, col, .OP_xor),
                 '~' => try tokens.addToken(line, col, .OP_negate),
-                '#' => {
-                    state = .InComment;
-                },
+                '#' => state = .InComment,
+                else => unreachable,
             }
         }
     }
@@ -366,7 +361,7 @@ pub fn tokenise(buffer: []u8, alloc: std.mem.Allocator) !TokenisedBuffer {
     return tokens;
 }
 
-test "Single bit literal parsing" {
+test "Literal: Single bit parsing" {
     const nm = "filename";
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken(nm, "1'd0", 0, 3));
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken(nm, "1'd1", 0, 3));
@@ -382,7 +377,7 @@ test "Single bit literal parsing" {
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken(nm, "'b1", 0, 2));
 }
 
-test "Binary parsing" {
+test "Literal: Binary parsing" {
     const nm = "filename";
     //Various correct forms
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 7, .width = 3 }, readLiteralToken(nm, "'b00111", 0, 6));
@@ -395,7 +390,7 @@ test "Binary parsing" {
     try testing.expectError(error.LiteralWidthError, readLiteralToken(nm, "3'b1111", 0, 6));
 }
 
-test "Decimal parsing" {
+test "Literal: Decimal parsing" {
     const nm = "filename";
     //Various correct forms
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 109, .width = 7 }, readLiteralToken(nm, "'d109", 0, 4));
@@ -408,7 +403,7 @@ test "Decimal parsing" {
     try testing.expectError(error.LiteralWidthError, readLiteralToken(nm, "3'd8", 0, 3));
 }
 
-test "Hex parsing" {
+test "Literal: Hex parsing" {
     const nm = "filename";
     //Various correct forms
     try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x109, .width = 9 }, readLiteralToken(nm, "'h109", 0, 4));
@@ -422,7 +417,7 @@ test "Hex parsing" {
     try testing.expectError(error.LiteralWidthError, readLiteralToken(nm, "3'hF", 0, 3));
 }
 
-test "Malformed structure errors" {
+test "Literal: Malformed structure errors" {
     //Invalid values
     const nm = "filename";
     testing.log_level = .err;
@@ -430,3 +425,25 @@ test "Malformed structure errors" {
     try testing.expectError(error.MalformedToken, readLiteralToken(nm, "1d'h3ff", 0, 6));
     try testing.expectError(error.MalformedToken, readLiteralToken(nm, "10'3ff", 0, 5));
 }
+
+test "MultiCharTokeniser: keywords" {
+    try testing.expectEqual(MultiCharToken{ .token = .KW_module, .value = null, .variable = null }, readMultiCharToken("module", 0, 5));
+    try testing.expectEqual(MultiCharToken{ .token = .KW_input, .value = null, .variable = null }, readMultiCharToken("input", 0, 4));
+    try testing.expectEqual(MultiCharToken{ .token = .KW_output, .value = null, .variable = null }, readMultiCharToken("output", 0, 5));
+    try testing.expectEqual(MultiCharToken{ .token = .KW_signal, .value = null, .variable = null }, readMultiCharToken("signal", 0, 5));
+    try testing.expectEqual(MultiCharToken{ .token = .KW_proc, .value = null, .variable = null }, readMultiCharToken("proc", 0, 3));
+    try testing.expectEqual(MultiCharToken{ .token = .KW_comb, .value = null, .variable = null }, readMultiCharToken("comb", 0, 3));
+}
+
+test "MultiCharTokeniser: values" {
+    try testing.expectEqual(MultiCharToken{ .token = .VL_integer_literal, .value = .{.val=0x123, .width=9}, .variable = null }, readMultiCharToken("9'h123", 0, 5));
+    try testing.expectEqual(MultiCharToken{ .token = .VL_integer_literal, .value = .{.val=0x123, .width=9}, .variable = null }, readMultiCharToken("'h123", 0, 4));
+    try testing.expectEqual(MultiCharToken{ .token = .VL_integer_literal, .value = .{.val=0x123, .width=10}, .variable = null }, readMultiCharToken("10'h123", 0, 6));
+}
+
+//test "Tokeniser: single keywords" {
+//    const inp = "module";
+//    const exp = [_]Token{.KW_module};
+//    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
+//    try testing.expectEqualSlices(Token, &exp, tk.tokens.items);
+//}
