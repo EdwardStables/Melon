@@ -526,6 +526,20 @@ test "Tokeniser: mix of tokens" {
     try expectEqualStringSlice(&exp_var, tk.variable_values.items);
 }
 
+test "Tokeniser: special case tokens" {
+    const inp = "abc = a ++ b == c;"; //Not valid code, but does include special case operators
+    
+    const exp_tok = [_]Token{.VL_variable, .SS_assign, .VL_variable, .OP_concat, .VL_variable, .OP_equals, .VL_variable, .SS_semi_colon};
+    const exp_var = [_]?[]const u8{"abc",null,"a",null,"b",null,"c",null};
+    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null,null,null};
+
+    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
+
+    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
+    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
+    try expectEqualStringSlice(&exp_var, tk.variable_values.items);
+}
+
 test "Tokeniser: mix of tokens and newlines/comments" {
     const inp = 
 \\module modmod { #module is called modmod
