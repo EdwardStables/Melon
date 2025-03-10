@@ -123,7 +123,7 @@ const TokenisedBuffer = struct {
 
 fn isSingleCharacterToken(c: u8) bool {
     return switch (c) {
-        '{', '}', '[', ']', ';', '=', '+', '-', '&', '|', '^', '~' => true,
+        '{', '}', '[', ']', ';', '=', '+', '-', '&', '|', '^', '~', '#' => true,
         else => false,
     };
 }
@@ -306,10 +306,8 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
         if (state != .InToken) {
             if (!sct and !td) {
                 state = .InToken;
-                multi_char_token_start_index = @intCast(i);
-            } else {
-                multi_char_token_start_index = 0;
             }
+            multi_char_token_start_index = @intCast(i);
         } 
 
         if (state == .InToken and (sct or td or last_char)) {
@@ -462,6 +460,19 @@ test "Tokeniser: single keyword" {
     try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
 }
 
+test "Tokeniser: single keyword with comment" {
+    const inp = "module #and a comment";
+    const exp_tok = [_]Token{.KW_module};
+    const exp_var = [_]?[]const u8{null};
+    const exp_val = [_]?IntegerWithWidth{null};
+
+    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
+
+    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
+    try testing.expectEqualSlices(?[]const u8, &exp_var, tk.variable_values.items);
+    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
+}
+
 test "Tokeniser: multiple keywords" {
     const inp = "module input   output signal     proc comb";
     
@@ -520,7 +531,7 @@ test "Tokeniser: mix of tokens and newlines/comments" {
 \\module modmod { #module is called modmod
 \\    # We need to modify the syntax to not require widthed integers in signals
 \\    signal ['d1] abc;
-\\};
+\\}
 ;
     
     const exp_tok = [_]Token{.KW_module, .VL_variable, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
