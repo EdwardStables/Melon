@@ -331,7 +331,7 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 
             const end = if (sct or td) i else i + 1;
             const mct = try readMultiCharToken(input_buffer[multi_char_token_start_index..end]);
             const loc: Location = .{.column = multi_char_token_start_index, .line = line};
-
+            std.debug.print("Adding\n", .{});
             switch (mct.token) {
                 .VL_variable => try token_buffer.addVariable(loc, mct.variable.?),
                 .VL_integer_literal => try token_buffer.addLiteral(loc, mct.value.?),
@@ -559,4 +559,30 @@ test "Tokeniser: mix of tokens and newlines/comments" {
     const exp_var = [_]?[]const u8{null,"modmod",null,null,null,null,null,"abc",null,null};
     const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,.{.val=1,.width=1},null,null,null,null};
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
+}
+
+test "Tokeniser: fill small buffer" {
+    const input = "module module   \n module";
+    const tokens = [_]Token{.KW_module};
+    const variables = [_]?[]const u8{null};
+    const values = [_]?IntegerWithWidth{null};
+
+    var buffer = try TokenisedBuffer.init(1, std.testing.allocator); defer buffer.deinit();
+
+    try testing.expectEqual(6, try tokenise(input, &buffer));
+    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
+    try testing.expectEqualSlices(Token, &tokens, buffer.tokens[0..1]);
+
+    buffer.clear();
+    try testing.expectEqual(7, try tokenise(input, &buffer));
+    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
+    try testing.expectEqualSlices(Token, &tokens, buffer.tokens[0..1]);
+
+    buffer.clear();
+    try testing.expectEqual(11, try tokenise(input, &buffer));
+    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
+    try testing.expectEqualSlices(Token, &tokens, buffer.tokens[0..1]);
 }
