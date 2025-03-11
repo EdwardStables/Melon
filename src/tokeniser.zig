@@ -73,51 +73,65 @@ const Location = struct {
     column: usize,
 };
 
-const TokenisedBuffer = struct {
-    tokens: ArrayList(Token),
-    locations: ArrayList(Location),
-    variable_values: ArrayList(?[]const u8),
-    integer_literal_values: ArrayList(?IntegerWithWidth),
+pub const TokenisedBuffer = struct {
+    tokens: []Token,
+    locations: []Location,
+    variable_values: []?[]const u8,
+    integer_literal_values: []?IntegerWithWidth,
+    size: u32,
+    capacity: u32,
+    allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    fn init(alloc: std.mem.Allocator) Self {
+    fn init(capacity: u32, alloc: std.mem.Allocator) !Self {
         return .{
-            .tokens = ArrayList(Token).init(alloc),
-            .locations = ArrayList(Location).init(alloc),
-            .variable_values = ArrayList(?[]const u8).init(alloc),
-            .integer_literal_values = ArrayList(?IntegerWithWidth).init(alloc),
+            .tokens = try alloc.alloc(Token, capacity),
+            .locations = try alloc.alloc(Location, capacity),
+            .variable_values = try alloc.alloc(?[]const u8, capacity),
+            .integer_literal_values = try alloc.alloc(?IntegerWithWidth, capacity),
+            .size = 0,
+            .capacity = capacity,
+            .allocator = alloc,
         };
     }
 
     fn deinit(self: Self) void {
-        self.tokens.deinit();
-        self.locations.deinit();
-        self.variable_values.deinit();
-        self.integer_literal_values.deinit();
+        self.allocator.free(self.tokens);
+        self.allocator.free(self.locations);
+        self.allocator.free(self.variable_values);
+        self.allocator.free(self.integer_literal_values);
     }
 
-    fn addToken(self: *Self, line: usize, column: usize, token: Token) !void {
+    fn clear(self: *Self) void {
+        self.size = 0;
+    }
+
+    fn add(self: *Self, token: Token, loc: Location, variable: ?[] const u8, value: ?IntegerWithWidth) !void {
+        if (self.size == self.capacity) {
+            return error.FullBuffer;
+        }
+
+        self.tokens[self.size] = token;
+        self.locations[self.size] = loc;
+        self.variable_values[self.size] = variable;
+        self.integer_literal_values[self.size] = value;
+
+        self.size += 1;
+    }
+
+    pub fn addToken(self: *Self, loc: Location, token: Token) !void {
         if (token == .VL_variable or token == .VL_integer_literal)
             return error.InternalTokeniserError;
-        try self.tokens.append(token);
-        try self.locations.append(.{ .line = line, .column = column });
-        try self.variable_values.append(null);
-        try self.integer_literal_values.append(null);
+        try self.add(token, loc, null, null);
     }
 
-    fn addVariable(self: *Self, line: usize, column: usize, variable: []const u8) !void {
-        try self.tokens.append(.VL_variable);
-        try self.locations.append(.{ .line = line, .column = column });
-        try self.variable_values.append(variable);
-        try self.integer_literal_values.append(null);
+    pub fn addVariable(self: *Self, loc: Location, variable: []const u8) !void {
+        try self.add(.VL_variable, loc, variable, null);
     }
 
-    fn addLiteral(self: *Self, line: usize, column: usize, value: IntegerWithWidth) !void {
-        try self.tokens.append(.VL_integer_literal);
-        try self.locations.append(.{ .line = line, .column = column });
-        try self.variable_values.append(null);
-        try self.integer_literal_values.append(value);
+    pub fn addLiteral(self: *Self, loc: Location, value: IntegerWithWidth) !void {
+        try self.add(.VL_integer_literal, loc, null, value);
     }
 };
 
@@ -258,7 +272,7 @@ fn readMultiCharToken(trial_token: []const u8) !MultiCharToken {
 }
 
 pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer {
-    var tokens = TokenisedBuffer.init(alloc);
+    var tokens = try TokenisedBuffer.init(1024, alloc);
 
     var line: usize = 0;
     var col: usize = 0;
@@ -313,11 +327,12 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
         if (state == .InToken and (sct or td or last_char)) {
             const end = if (sct or td) i else i + 1;
             const mct = try readMultiCharToken(buffer[multi_char_token_start_index..end]);
+            const loc: Location = .{.column = multi_char_token_start_index, .line = line};
 
             switch (mct.token) {
-                .VL_variable => try tokens.addVariable(line, multi_char_token_start_index, mct.variable.?),
-                .VL_integer_literal => try tokens.addLiteral(line, multi_char_token_start_index, mct.value.?),
-                else => try tokens.addToken(line, multi_char_token_start_index, mct.token),
+                .VL_variable => try tokens.addVariable(loc, mct.variable.?),
+                .VL_integer_literal => try tokens.addLiteral(loc, mct.value.?),
+                else => try tokens.addToken(loc, mct.token),
             }
             state = .Idle;
             multi_char_token_start_index = 0;
@@ -326,34 +341,35 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
         //Process single character tokens, as well as ++ and == which are more easily treated as special cases
         if (sct) {
             assert(state == .Idle); //We assume one character lookahead has put us into idle before reaching here
+            const loc: Location = .{.column = col, .line = line};
             //single character tokens:
             switch (c) {
-                '{' => try tokens.addToken(line, col, .SS_open_brace),
-                '}' => try tokens.addToken(line, col, .SS_close_brace),
-                '[' => try tokens.addToken(line, col, .SS_open_bracket),
-                ']' => try tokens.addToken(line, col, .SS_close_bracket),
-                ';' => try tokens.addToken(line, col, .SS_semi_colon),
+                '{' => try tokens.addToken(loc, .SS_open_brace),
+                '}' => try tokens.addToken(loc, .SS_close_brace),
+                '[' => try tokens.addToken(loc, .SS_open_bracket),
+                ']' => try tokens.addToken(loc, .SS_close_bracket),
+                ';' => try tokens.addToken(loc, .SS_semi_colon),
                 '=' => {
                     if (c_n != null and c_n.? == '=') {
-                        try tokens.addToken(line, col, .OP_equals);
+                        try tokens.addToken(loc, .OP_equals);
                         state = .Skip;
                     } else {
-                        try tokens.addToken(line, col, .SS_assign);
+                        try tokens.addToken(loc, .SS_assign);
                     }
                 },
                 '+' => {
                     if (c_n != null and c_n.? == '+') {
-                        try tokens.addToken(line, col, .OP_concat);
+                        try tokens.addToken(loc, .OP_concat);
                         state = .Skip;
                     } else {
-                        try tokens.addToken(line, col, .OP_add);
+                        try tokens.addToken(loc, .OP_add);
                     }
                 },
-                '-' => try tokens.addToken(line, col, .OP_subtract),
-                '&' => try tokens.addToken(line, col, .OP_and),
-                '|' => try tokens.addToken(line, col, .OP_or),
-                '^' => try tokens.addToken(line, col, .OP_xor),
-                '~' => try tokens.addToken(line, col, .OP_negate),
+                '-' => try tokens.addToken(loc, .OP_subtract),
+                '&' => try tokens.addToken(loc, .OP_and),
+                '|' => try tokens.addToken(loc, .OP_or),
+                '^' => try tokens.addToken(loc, .OP_xor),
+                '~' => try tokens.addToken(loc, .OP_negate),
                 '#' => state = .InComment,
                 else => unreachable,
             }
@@ -447,46 +463,6 @@ test "MultiCharTokeniser: variables" {
     try testing.expectError(error.UnknownTokenError, readMultiCharToken("_var_with_!_bad_char"));
 }
 
-test "Tokeniser: single keyword" {
-    const inp = "module";
-    const exp_tok = [_]Token{.KW_module};
-    const exp_var = [_]?[]const u8{null};
-    const exp_val = [_]?IntegerWithWidth{null};
-
-    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-
-    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
-    try testing.expectEqualSlices(?[]const u8, &exp_var, tk.variable_values.items);
-    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
-}
-
-test "Tokeniser: single keyword with comment" {
-    const inp = "module #and a comment";
-    const exp_tok = [_]Token{.KW_module};
-    const exp_var = [_]?[]const u8{null};
-    const exp_val = [_]?IntegerWithWidth{null};
-
-    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-
-    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
-    try testing.expectEqualSlices(?[]const u8, &exp_var, tk.variable_values.items);
-    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
-}
-
-test "Tokeniser: multiple keywords" {
-    const inp = "module input   output signal     proc comb";
-    
-    const exp_tok = [_]Token{.KW_module, .KW_input, .KW_output, .KW_signal, .KW_proc, .KW_comb};
-    const exp_var = [_]?[]const u8{null,null,null,null,null,null};
-    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null};
-
-    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-
-    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
-    try testing.expectEqualSlices(?[]const u8, &exp_var, tk.variable_values.items);
-    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
-}
-
 fn expectEqualStringSlice(expected: []const ?[]const u8, actual: []const ?[]const u8) !void {
     if (expected.len != actual.len) {
         std.debug.print("Length mismatch: expected {} found {}\n", .{expected.len, actual.len});
@@ -512,18 +488,49 @@ fn expectEqualStringSlice(expected: []const ?[]const u8, actual: []const ?[]cons
     }
 }
 
+fn expectEqualTokens(input: []const u8, tokens: []const Token, variables: []const ?[]const u8, values: []const ?IntegerWithWidth) !void {
+    var tk = try tokenise(input, testing.allocator); defer tk.deinit();
+
+    try testing.expectEqualSlices(?IntegerWithWidth, values, tk.integer_literal_values[0..tokens.len]);
+    try expectEqualStringSlice(variables, tk.variable_values[0..tokens.len]);
+    try testing.expectEqualSlices(Token, tokens, tk.tokens[0..tokens.len]);
+}    
+
+
+test "Tokeniser: single keyword" {
+    const inp = "module";
+    const exp_tok = [_]Token{.KW_module};
+    const exp_var = [_]?[]const u8{null};
+    const exp_val = [_]?IntegerWithWidth{null};
+
+    try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
+}
+
+test "Tokeniser: single keyword with comment" {
+    const inp = "module #and a comment";
+    const exp_tok = [_]Token{.KW_module};
+    const exp_var = [_]?[]const u8{null};
+    const exp_val = [_]?IntegerWithWidth{null};
+
+    try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
+}
+
+test "Tokeniser: multiple keywords" {
+    const inp = "module input   output signal     proc comb";
+    
+    const exp_tok = [_]Token{.KW_module, .KW_input, .KW_output, .KW_signal, .KW_proc, .KW_comb};
+    const exp_var = [_]?[]const u8{null,null,null,null,null,null};
+    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null};
+
+    try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
+}
 test "Tokeniser: mix of tokens" {
     const inp = "module {signal ['d1] abc;}";
     
     const exp_tok = [_]Token{.KW_module, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
     const exp_var = [_]?[]const u8{null,null,null,null,null,null,"abc",null,null};
     const exp_val = [_]?IntegerWithWidth{null,null,null,null,.{.val=1,.width=1},null,null,null,null};
-
-    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-
-    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
-    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
-    try expectEqualStringSlice(&exp_var, tk.variable_values.items);
+    try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 
 test "Tokeniser: special case tokens" {
@@ -532,12 +539,7 @@ test "Tokeniser: special case tokens" {
     const exp_tok = [_]Token{.VL_variable, .SS_assign, .VL_variable, .OP_concat, .VL_variable, .OP_equals, .VL_variable, .SS_semi_colon};
     const exp_var = [_]?[]const u8{"abc",null,"a",null,"b",null,"c",null};
     const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null,null,null};
-
-    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-
-    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
-    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
-    try expectEqualStringSlice(&exp_var, tk.variable_values.items);
+    try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 
 test "Tokeniser: mix of tokens and newlines/comments" {
@@ -551,10 +553,5 @@ test "Tokeniser: mix of tokens and newlines/comments" {
     const exp_tok = [_]Token{.KW_module, .VL_variable, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
     const exp_var = [_]?[]const u8{null,"modmod",null,null,null,null,null,"abc",null,null};
     const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,.{.val=1,.width=1},null,null,null,null};
-
-    var tk = try tokenise(inp, testing.allocator); defer tk.deinit();
-
-    try testing.expectEqualSlices(Token, &exp_tok, tk.tokens.items);
-    try testing.expectEqualSlices(?IntegerWithWidth, &exp_val, tk.integer_literal_values.items);
-    try expectEqualStringSlice(&exp_var, tk.variable_values.items);
+    try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
