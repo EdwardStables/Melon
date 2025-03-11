@@ -32,20 +32,18 @@ statement ::= assignment_statement SS_semi_colon |
 if_statement ::= KW_if expr SS_open_brace statement_list SS_close_brace
 assignment_statement ::= VL_variable SS_assign expr SS_semi_colon
 
-expr ::= expr SS_open_bracket expr SS_close_bracket |
-         SS_open_parenthesis expr SS_close_parenthesis |
-         VL_integer_literal |
-         VL_variable |
-         OP_and expr | OP_or expr | OP_negate expr | OP_xor expr |
-         expr OP_add expr |
-         expr OP_subtract expr |
-         expr OP_and expr |
-         expr OP_or expr |
-         expr OP_xor expr |
-         expr OP_lsl expr |
-         expr OP_lsr expr |
-         expr OP_concat expr |
-         expr OP_equals expr
+expr ::= atomic_expr atom_follow expr_tail |
+         unary_op expr expr_tail
+expr_tail ::= binary_op expr expr_tail | ""
+
+atom_follow ::= SS_open_bracket expr SS_close_bracket | ""
+atomic_expr ::= SS_open_parenthesis expr SS_close_parenthesis |
+                VL_integer_literal |
+                VL_variable |
+unary_op ::= OP_and | OP_or | OP_negate | OP_xor 
+binary_op ::= OP_add expr | OP_subtract | OP_and |
+             OP_or | OP_xor | OP_lsl |
+             OP_lsr | OP_concat | OP_equals
 
 instantiation ::= VL_variable VL_varialbe SS_open_parenthesis signal_connection_list SS_close_parenthesis SS_semi_colon
 signal_connection_list ::= signal_connection SS_comma signal_connection_list | ""
