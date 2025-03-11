@@ -39,6 +39,8 @@ const Token = enum {
     SS_close_brace, //}
     SS_open_bracket, //[
     SS_close_bracket, //]
+    SS_open_parenthesis, //(
+    SS_close_parenthesis, //)
     SS_semi_colon,
     SS_comma,
     SS_assign,
@@ -50,6 +52,7 @@ const Token = enum {
     OP_lsr,
     OP_concat,
     OP_and,
+    OP_dot,
     OP_or,
     OP_xor,
     OP_negate,
@@ -137,7 +140,7 @@ pub const TokenisedBuffer = struct {
 
 fn isSingleCharacterToken(c: u8) bool {
     return switch (c) {
-        '{', '}', '[', ']', ';', '=', '+', '-', '&', '|', '^', '~', '#' => true,
+        '{', '}', '[', ']', '(', ')', ';', '=', '+', '-', '&', '|', '^', '~', '#' => true,
         else => false,
     };
 }
@@ -351,6 +354,8 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 
                 '}' => try token_buffer.addToken(loc, .SS_close_brace),
                 '[' => try token_buffer.addToken(loc, .SS_open_bracket),
                 ']' => try token_buffer.addToken(loc, .SS_close_bracket),
+                '(' => try token_buffer.addToken(loc, .SS_open_parenthesis),
+                ')' => try token_buffer.addToken(loc, .SS_close_parenthesis),
                 ';' => try token_buffer.addToken(loc, .SS_semi_colon),
                 '=' => {
                     if (c_n != null and c_n.? == '=') {
