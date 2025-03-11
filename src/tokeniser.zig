@@ -271,9 +271,9 @@ fn readMultiCharToken(trial_token: []const u8) !MultiCharToken {
     return .{.token=.VL_variable, .variable=trial_token, .value=null};
 }
 
-pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer {
-    var tokens = try TokenisedBuffer.init(1024, alloc);
-
+/// Consume as many characters as possible from the input buffer and tokenise, storing in the token buffer.
+/// Returns the number of consumed characters from the input buffer.
+pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 {
     var line: usize = 0;
     var col: usize = 0;
 
@@ -286,9 +286,12 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
 
     var state: State = .Idle;
     var multi_char_token_start_index: u32 = 0;
+    var consumed_characters: u32 = 0;
 
-    for (buffer, 0..) |c, i| {
-        const c_n = if (i < buffer.len - 1) buffer[i + 1] else null;
+    for (input_buffer, 0..) |c, i| {
+        consumed_characters += 1;
+
+        const c_n = if (i < input_buffer.len - 1) input_buffer[i + 1] else null;
         const last_char = c_n == null;
 
         // Position handling
@@ -326,13 +329,13 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
 
         if (state == .InToken and (sct or td or last_char)) {
             const end = if (sct or td) i else i + 1;
-            const mct = try readMultiCharToken(buffer[multi_char_token_start_index..end]);
+            const mct = try readMultiCharToken(input_buffer[multi_char_token_start_index..end]);
             const loc: Location = .{.column = multi_char_token_start_index, .line = line};
 
             switch (mct.token) {
-                .VL_variable => try tokens.addVariable(loc, mct.variable.?),
-                .VL_integer_literal => try tokens.addLiteral(loc, mct.value.?),
-                else => try tokens.addToken(loc, mct.token),
+                .VL_variable => try token_buffer.addVariable(loc, mct.variable.?),
+                .VL_integer_literal => try token_buffer.addLiteral(loc, mct.value.?),
+                else => try token_buffer.addToken(loc, mct.token),
             }
             state = .Idle;
             multi_char_token_start_index = 0;
@@ -344,39 +347,39 @@ pub fn tokenise(buffer: [] const u8, alloc: std.mem.Allocator) !TokenisedBuffer 
             const loc: Location = .{.column = col, .line = line};
             //single character tokens:
             switch (c) {
-                '{' => try tokens.addToken(loc, .SS_open_brace),
-                '}' => try tokens.addToken(loc, .SS_close_brace),
-                '[' => try tokens.addToken(loc, .SS_open_bracket),
-                ']' => try tokens.addToken(loc, .SS_close_bracket),
-                ';' => try tokens.addToken(loc, .SS_semi_colon),
+                '{' => try token_buffer.addToken(loc, .SS_open_brace),
+                '}' => try token_buffer.addToken(loc, .SS_close_brace),
+                '[' => try token_buffer.addToken(loc, .SS_open_bracket),
+                ']' => try token_buffer.addToken(loc, .SS_close_bracket),
+                ';' => try token_buffer.addToken(loc, .SS_semi_colon),
                 '=' => {
                     if (c_n != null and c_n.? == '=') {
-                        try tokens.addToken(loc, .OP_equals);
+                        try token_buffer.addToken(loc, .OP_equals);
                         state = .Skip;
                     } else {
-                        try tokens.addToken(loc, .SS_assign);
+                        try token_buffer.addToken(loc, .SS_assign);
                     }
                 },
                 '+' => {
                     if (c_n != null and c_n.? == '+') {
-                        try tokens.addToken(loc, .OP_concat);
+                        try token_buffer.addToken(loc, .OP_concat);
                         state = .Skip;
                     } else {
-                        try tokens.addToken(loc, .OP_add);
+                        try token_buffer.addToken(loc, .OP_add);
                     }
                 },
-                '-' => try tokens.addToken(loc, .OP_subtract),
-                '&' => try tokens.addToken(loc, .OP_and),
-                '|' => try tokens.addToken(loc, .OP_or),
-                '^' => try tokens.addToken(loc, .OP_xor),
-                '~' => try tokens.addToken(loc, .OP_negate),
+                '-' => try token_buffer.addToken(loc, .OP_subtract),
+                '&' => try token_buffer.addToken(loc, .OP_and),
+                '|' => try token_buffer.addToken(loc, .OP_or),
+                '^' => try token_buffer.addToken(loc, .OP_xor),
+                '~' => try token_buffer.addToken(loc, .OP_negate),
                 '#' => state = .InComment,
                 else => unreachable,
             }
         }
     }
 
-    return tokens;
+    return @intCast(consumed_characters);
 }
 
 test "Literal: Single bit parsing" {
@@ -489,11 +492,13 @@ fn expectEqualStringSlice(expected: []const ?[]const u8, actual: []const ?[]cons
 }
 
 fn expectEqualTokens(input: []const u8, tokens: []const Token, variables: []const ?[]const u8, values: []const ?IntegerWithWidth) !void {
-    var tk = try tokenise(input, testing.allocator); defer tk.deinit();
+    var buffer = try TokenisedBuffer.init(1024, std.testing.allocator); defer buffer.deinit();
+    const consumed = try tokenise(input, &buffer);
 
-    try testing.expectEqualSlices(?IntegerWithWidth, values, tk.integer_literal_values[0..tokens.len]);
-    try expectEqualStringSlice(variables, tk.variable_values[0..tokens.len]);
-    try testing.expectEqualSlices(Token, tokens, tk.tokens[0..tokens.len]);
+    try testing.expectEqual(input.len, consumed);
+    try testing.expectEqualSlices(?IntegerWithWidth, values, buffer.integer_literal_values[0..tokens.len]);
+    try expectEqualStringSlice(variables, buffer.variable_values[0..tokens.len]);
+    try testing.expectEqualSlices(Token, tokens, buffer.tokens[0..tokens.len]);
 }    
 
 
