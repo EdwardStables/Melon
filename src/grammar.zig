@@ -172,19 +172,27 @@ test "RuleEnum: Stuff gets loaded" {
 }
 
 test "asderg" {
-    for (0..RuleCount) |i| {
+    rules: for (0..RuleCount) |i| {
         std.debug.print("{s}\n", .{@tagName(@as(RuleEnum, @enumFromInt(i)))});
         for (0..MaxAlternativeCount) |j| {
-            for (0..MaxTermCount) |k| {
-                if (Rules[i][j] != null and k < Rules[i][j].?.term_count)
-                    std.debug.print("   {s} ", .{
-                        switch(Rules[i][j].?.terms[k].?) {
-                            .token => |t| @tagName(t),
-                            .rule => |r| @tagName(r),
-                        }
-                    });
+            terms: for (0..MaxTermCount) |k| {
+                if (Rules[i][j] == null) continue :rules;
+                if (Rules[i][j]) |r| {
+                    if (!r.empty and k >= Rules[i][j].?.term_count) break :terms;
+                    if (r.empty) {
+                        std.debug.print("   E", .{});
+                        break :terms;
+                    } else {
+                        std.debug.print("   {s} ", .{
+                            switch(Rules[i][j].?.terms[k].?) {
+                                .token => |t| @tagName(t),
+                                .rule => |t| @tagName(t),
+                            }
+                        });
+                    }
+                } 
             }
+            std.debug.print("\n",.{});
         }
-        std.debug.print("\n",.{});
     }
 }
