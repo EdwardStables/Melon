@@ -25,7 +25,17 @@ const TokeniserError = error{
     LiteralWidthError,
 };
 
-const Token = enum {
+/// Used by grammar, not tokeniser
+/// Is linear in tokensize but only runs at compile time on limit input
+pub fn tokenFromTokenString(str: []const u8) ?Token {
+    inline for (@typeInfo(Token).@"enum".fields) |f| {
+        if (std.mem.eql(u8, str, f.name)) return @enumFromInt(f.value);
+    }
+
+    return null;
+}
+
+pub const Token = enum {
     //Keywords
     KW_module,
     KW_input,
@@ -334,7 +344,6 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 
             const end = if (sct or td) i else i + 1;
             const mct = try readMultiCharToken(input_buffer[multi_char_token_start_index..end]);
             const loc: Location = .{.column = multi_char_token_start_index, .line = line};
-            std.debug.print("Adding\n", .{});
             switch (mct.token) {
                 .VL_variable => try token_buffer.addVariable(loc, mct.variable.?),
                 .VL_integer_literal => try token_buffer.addLiteral(loc, mct.value.?),
@@ -342,6 +351,13 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 
             }
             state = .Idle;
             multi_char_token_start_index = 0;
+            if (token_buffer.size == token_buffer.capacity) {
+                // We don't want to indicate we have consumed single character tokens if we are full
+                // So decrement the counter so it will be consumed on the next pass
+                if (sct) consumed_characters -= 1;
+                break;
+            }
+
         }
 
         //Process single character tokens, as well as ++ and == which are more easily treated as special cases
@@ -381,6 +397,8 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 
                 '#' => state = .InComment,
                 else => unreachable,
             }
+
+            if (token_buffer.size == token_buffer.capacity) break;
         }
     }
 
@@ -567,27 +585,38 @@ test "Tokeniser: mix of tokens and newlines/comments" {
 }
 
 test "Tokeniser: fill small buffer" {
-    const input = "module module   \n module";
-    const tokens = [_]Token{.KW_module};
+    const input = "module module+   \n module ";
+    const token1 = [_]Token{.KW_module};
+    const token2 = [_]Token{.OP_add};
     const variables = [_]?[]const u8{null};
     const values = [_]?IntegerWithWidth{null};
 
     var buffer = try TokenisedBuffer.init(1, std.testing.allocator); defer buffer.deinit();
 
-    try testing.expectEqual(6, try tokenise(input, &buffer));
+    var consumed = try tokenise(input, &buffer);
+    try testing.expectEqual(7, consumed);
     try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
     try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
-    try testing.expectEqualSlices(Token, &tokens, buffer.tokens[0..1]);
-
+    try testing.expectEqualSlices(Token, &token1, buffer.tokens[0..1]);
     buffer.clear();
-    try testing.expectEqual(7, try tokenise(input, &buffer));
-    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
-    try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
-    try testing.expectEqualSlices(Token, &tokens, buffer.tokens[0..1]);
 
-    buffer.clear();
-    try testing.expectEqual(11, try tokenise(input, &buffer));
+    consumed += try tokenise(input[consumed..], &buffer);
+    try testing.expectEqual(13, consumed);
     try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
     try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
-    try testing.expectEqualSlices(Token, &tokens, buffer.tokens[0..1]);
+    try testing.expectEqualSlices(Token, &token1, buffer.tokens[0..1]);
+    buffer.clear();
+
+    consumed += try tokenise(input[consumed..], &buffer);
+    try testing.expectEqual(14, consumed);
+    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
+    try testing.expectEqualSlices(Token, &token2, buffer.tokens[0..1]);
+    buffer.clear();
+
+    consumed += try tokenise(input[consumed..], &buffer);
+    try testing.expectEqual(26, consumed);
+    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
+    try testing.expectEqualSlices(Token, &token1, buffer.tokens[0..1]);
 }
