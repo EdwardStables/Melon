@@ -10,7 +10,7 @@ signal_ports ::= SS_open_parenthesis signal_port_list SS_close_parenthesis;
 signal_port_list ::= signal_port SS_comma signal_port_list |
                      signal_port | E;
 signal_port ::= direction width signal_name;
-direction ::= input | output;
+direction ::= KW_input | KW_output;
 width ::= SS_open_bracket VL_integer_literal SS_close_bracket | E;
 signal_name ::= VL_variable;
 
@@ -40,11 +40,11 @@ atom_follow ::= SS_open_bracket expr SS_close_bracket | E;
 atomic_expr ::= SS_open_parenthesis expr SS_close_parenthesis |
                 VL_integer_literal |
                 VL_variable;
-unary_op ::= OP_and | OP_or | OP_negate | OP_xor 
-binary_op ::= OP_add expr | OP_subtract | OP_and |
+unary_op ::= OP_and | OP_or | OP_negate | OP_xor;
+binary_op ::= OP_add | OP_subtract | OP_and |
              OP_or | OP_xor | OP_lsl |
              OP_lsr | OP_concat | OP_equals;
 
-instantiation ::= VL_variable VL_varialbe SS_open_parenthesis signal_connection_list SS_close_parenthesis SS_semi_colon;
+instantiation ::= VL_variable VL_variable SS_open_parenthesis signal_connection_list SS_close_parenthesis SS_semi_colon;
 signal_connection_list ::= signal_connection SS_comma signal_connection_list | E;
 signal_connection ::= OP_dot VL_variable SS_open_parenthesis VL_variable SS_close_parenthesis;

@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
             std.debug.panic("Error while reading grammar file contents", .{})
     ) |line| {
         if (line.len == 0) continue;
-        const copied_line = b.allocator.alloc(u8, line.len+1) catch 
+        const copied_line = b.allocator.alloc(u8, line.len) catch 
             std.debug.panic("Error while creating buffer for rule line", .{});
         std.mem.copyForwards(u8, copied_line, line);
         rules.append(copied_line) catch 

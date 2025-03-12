@@ -43,6 +43,7 @@ pub const Token = enum {
     KW_signal,
     KW_proc,
     KW_comb,
+    KW_if,
 
     //Structural Symbols
     SS_open_brace, //{
@@ -86,7 +87,7 @@ const Location = struct {
     column: usize,
 };
 
-pub const TokenisedBuffer = struct {
+pub const TokenBuffer = struct {
     tokens: []Token,
     locations: []Location,
     variable_values: []?[]const u8,
@@ -286,7 +287,7 @@ fn readMultiCharToken(trial_token: []const u8) !MultiCharToken {
 
 /// Consume as many characters as possible from the input buffer and tokenise, storing in the token buffer.
 /// Returns the number of consumed characters from the input buffer.
-pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenisedBuffer) !u32 {
+pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenBuffer) !u32 {
     var line: usize = 0;
     var col: usize = 0;
 
@@ -515,7 +516,7 @@ fn expectEqualStringSlice(expected: []const ?[]const u8, actual: []const ?[]cons
 }
 
 fn expectEqualTokens(input: []const u8, tokens: []const Token, variables: []const ?[]const u8, values: []const ?IntegerWithWidth) !void {
-    var buffer = try TokenisedBuffer.init(1024, std.testing.allocator); defer buffer.deinit();
+    var buffer = try TokenBuffer.init(1024, std.testing.allocator); defer buffer.deinit();
     const consumed = try tokenise(input, &buffer);
 
     try testing.expectEqual(input.len, consumed);
@@ -591,7 +592,7 @@ test "Tokeniser: fill small buffer" {
     const variables = [_]?[]const u8{null};
     const values = [_]?IntegerWithWidth{null};
 
-    var buffer = try TokenisedBuffer.init(1, std.testing.allocator); defer buffer.deinit();
+    var buffer = try TokenBuffer.init(1, std.testing.allocator); defer buffer.deinit();
 
     var consumed = try tokenise(input, &buffer);
     try testing.expectEqual(7, consumed);
