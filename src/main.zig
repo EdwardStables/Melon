@@ -4,6 +4,8 @@ const module = @import("module.zig");
 const simulate = @import("simulate.zig");
 const cdag = @import("comb_dag.zig");
 const ir = @import("flow_ir.zig");
+const tokeniser = @import("tokeniser.zig");
+const grammar = @import("grammar.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

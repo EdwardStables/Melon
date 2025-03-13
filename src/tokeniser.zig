@@ -72,9 +72,8 @@ pub const Token = enum {
     //Valued,
     VL_variable, // a-zA-Z0-9_
     VL_integer_literal, // Widthless binary: 0 or 1
-    //
-    //
-    //
+
+    PR_EMPTY, //Special symbol used by parser, can never actually be tokenised from input
 };
 
 const IntegerWithWidth = struct { //TODO needs to be arbitrary
