@@ -148,9 +148,22 @@ fn ruleFromRuleString(str: []const u8) ?RuleEnum {
     return null;
 }
 
-fn constructParseTable(alloc: std.mem.Allocator) !void {
-    var first_sets = std.AutoHashMap(RuleEnum, std.EnumSet(Token)).init(alloc);
-    defer first_sets.deinit();
+const RuleTokenSet = std.AutoHashMap(RuleEnum, std.EnumSet(Token));
+
+fn printRuleTokenSet(sets: *RuleTokenSet) void {
+    var it = sets.iterator();
+    while (it.next()) |entry| {
+        std.debug.print("{s}: ", .{@tagName(entry.key_ptr.*)});
+        var vi_it = entry.value_ptr.iterator();
+        while (vi_it.next()) |token| {
+            std.debug.print("{s} ", .{@tagName(token)});
+        }
+        std.debug.print("\n", .{});
+    }
+}
+
+fn constructFirstSets(alloc: std.mem.Allocator) !RuleTokenSet {
+    var first_sets = RuleTokenSet.init(alloc);
 
     //Initialise sets to empty
     for (0..RuleCount) |rule_index| {
@@ -218,17 +231,79 @@ fn constructParseTable(alloc: std.mem.Allocator) !void {
         }
     }
 
+    return first_sets;
+}
 
+fn constructFollowSets(first_sets: *RuleTokenSet, alloc: std.mem.Allocator) !RuleTokenSet {
+    var follow_sets = RuleTokenSet.init(alloc);
 
-    var it = first_sets.iterator();
-    while (it.next()) |entry| {
-        std.debug.print("{s}: ", .{@tagName(entry.key_ptr.*)});
-        var vi_it = entry.value_ptr.iterator();
-        while (vi_it.next()) |token| {
-            std.debug.print("{s} ", .{@tagName(token)});
+    //Initialise sets to empty
+    for (0..RuleCount) |rule_index| {
+        var set = std.EnumSet(Token).initEmpty();
+        const rule: RuleEnum = @enumFromInt(rule_index);
+
+        if (rule == .module) { //module is the start symbol and therefore has the follow token of PR_END
+            set.insert(.PR_END);
         }
-        std.debug.print("\n", .{});
+
+        try follow_sets.put(rule, set);
     }
+
+    var change = true;
+    while (change) {
+        change = false;
+        rules: for (0..RuleCount) |rule_index| {
+            const rule: RuleEnum = @enumFromInt(rule_index);
+            for (0..MaxAlternativeCount) |alternative_index| {
+                //If it's null then we've gone through all the alternatives
+                if (Rules[rule_index][alternative_index] == null) continue :rules;
+                const ra = Rules[rule_index][alternative_index].?;
+                if (ra.empty) continue;
+
+                std.debug.assert(ra.term_count > 0);
+
+                // For pattern B->wAw' if terminal a is in First(w') then add it to Follow(A)
+                // For pattern B->wAw' if E is in First(w') or w' has length 0 then add Follow(B) to Follow(A)
+                var active_set = follow_sets.get(rule) orelse unreachable; //Init to B's follow set
+                var term_index = ra.term_count;
+                while (term_index > 0) {
+                    term_index -= 1;
+                    switch(ra.terms[term_index] orelse unreachable) {
+                        //If we see a token then the active set must be cleared and just this token added
+                        .token => |t| {
+                            active_set = @TypeOf(active_set).initEmpty();
+                            active_set.insert(t);
+                        },
+                        // First update the follow set of r with the active set
+                        // Then update the active set:
+                        //     - If E is in the rule's first set then the existing active set can be kept with new first set entries
+                        //     - If E is not in the rule's first set then we make the active set equal to the rule's first set
+                        .rule => |r| {
+                            var rule_follow_set = follow_sets.get(r) orelse unreachable;
+                            var rule_first_set = first_sets.get(r) orelse unreachable;
+                            var updated_rule_follow_set = rule_follow_set.unionWith(active_set);
+
+                            // Update follow
+                            if (!updated_rule_follow_set.eql(rule_follow_set)) {
+                                try follow_sets.put(r, updated_rule_follow_set);
+                                change = true;
+                            }
+
+                            if (rule_first_set.contains(.PR_EMPTY)) { // Containing empty means we are transparent and continue using the active set
+                                // Add this rule's first set, but excluding the empty token
+                                active_set = active_set.unionWith(rule_first_set.differenceWith(std.EnumSet(Token).initOne(.PR_EMPTY)));
+                            } else { // Not containing empty resets the active set
+                                active_set = rule_first_set;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    return follow_sets;
 }
 
 pub fn expand(stack: *ArrayList(RuleElement), next_token: Token) !bool {
@@ -289,8 +364,16 @@ test "RuleEnum: Stuff gets loaded" {
     }
 }
 
-test "Parser Table" {
-    try constructParseTable(std.testing.allocator);
+test "First and follow sets" {
+    var first_sets = try constructFirstSets(std.testing.allocator);
+    defer first_sets.deinit();
+
+
+    var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
+    defer follow_sets.deinit();
+
+    //printRuleTokenSet(&first_sets);
+    //printRuleTokenSet(&follow_sets);
 }
 
 //test "Debug: print rules" {
