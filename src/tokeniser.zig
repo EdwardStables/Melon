@@ -99,7 +99,7 @@ pub const TokenBuffer = struct {
 
     const Self = @This();
 
-    fn init(capacity: u32, alloc: std.mem.Allocator) !Self {
+    pub fn init(capacity: u32, alloc: std.mem.Allocator) !Self {
         return .{
             .tokens = try alloc.alloc(Token, capacity),
             .locations = try alloc.alloc(Location, capacity),
@@ -111,7 +111,7 @@ pub const TokenBuffer = struct {
         };
     }
 
-    fn deinit(self: Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.tokens);
         self.allocator.free(self.locations);
         self.allocator.free(self.variable_values);

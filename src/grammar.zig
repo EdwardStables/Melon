@@ -6,6 +6,18 @@ const tokeniser = @import("tokeniser.zig");
 const Token = tokeniser.Token;
 const TokenBuffer = tokeniser.TokenBuffer;
 
+const builtin = @import("builtin");
+const log = if (builtin.is_test)
+    struct {
+        const base = std.log.scoped(.parser);
+        const err = warn;
+        const warn = base.warn;
+        const info = base.info;
+        const debug = base.debug;
+    }
+else
+    log.scoped(.parser);
+
 const SpecialCase = enum {
     Empty,
     Null
@@ -355,8 +367,6 @@ fn constructParseTable(first_sets: *RuleTokenSet, follow_sets: *RuleTokenSet, al
 
                 if (first.contains(token) or (first.contains(.PR_EMPTY) and follow.contains(token))) {
                     //This should be an LL(1) grammar, if there has already been an entry then there is a bug in the parser or the grammar itself
-                    std.debug.print("{} {} {} ", .{rule, token, alternative});
-                    std.debug.print("{} {}\n", .{first.contains(token), (first.contains(.PR_EMPTY) and follow.contains(token))});
                     std.debug.assert(table[non_terminal_index][token_index] == null);
                     table[non_terminal_index][token_index] = alternative;
                 }
@@ -365,6 +375,56 @@ fn constructParseTable(first_sets: *RuleTokenSet, follow_sets: *RuleTokenSet, al
     }
 
     return table;
+}
+
+fn parse(table: *ParseTable, tokens: TokenBuffer, alloc: std.mem.Allocator) !?u32 {
+    var stack = std.ArrayList(RuleElement).init(alloc);
+    defer stack.deinit();
+    try stack.append(.{ .token = .PR_END });
+    try stack.append(.{ .rule = .module });
+
+    var index: u32 = 0;
+    while (index < tokens.size) {
+        const next_input_token = tokens.tokens[index];
+        const next_stack_element = stack.popOrNull() orelse unreachable;
+        log.info("Popped {s}.", .{@tagName(next_stack_element)});
+
+        if (next_input_token == .PR_END) {
+            log.err("Reached end of parse stack but still see input tokens. Next observed token is {s}, index {}", .{@tagName(next_input_token),index});
+        }
+
+        switch (next_stack_element) {
+            .token => |t| {
+                if (t == next_input_token) {
+                    //Matching
+                    index += 1;
+                    continue;
+                } else {
+                    //mismatching
+                    log.err("Saw unexpected token {s} at index {}. Expected token {s}.", .{@tagName(next_input_token),index,@tagName(t)});
+                    return index;
+                }
+            },
+            .rule => |r| {
+                // No rule matches input token
+                const next = table[@intFromEnum(r)][@intFromEnum(next_input_token)] orelse {
+                    log.err("Input token {s} at index {} does not have a matching alternative. Stack top is rule {s}", .{@tagName(next_input_token),index,@tagName(r)});
+                    return index;
+                };
+                const rule = Rules[next];
+                var term_index = rule.term_count;
+                while (term_index > 0) {
+                    term_index -= 1;
+                    const next_element = rule.terms[term_index] orelse undefined;
+                    log.info("For {s} push {s}", .{@tagName(r),@tagName(next_element)});
+                    try stack.append(next_element);
+                }
+            }
+        }
+    }
+
+    //Success
+    return null;
 }
 
 //test "RuleEnum: Stuff gets loaded" {
@@ -431,25 +491,21 @@ test "Gen Parse Table" {
     var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
     defer follow_sets.deinit();
 
-    printRuleTokenSet(&first_sets);
-    std.debug.print("\n", .{});
-    printRuleTokenSet(&follow_sets);
-
     const table = try constructParseTable(&first_sets, &follow_sets, std.testing.allocator);
     defer std.testing.allocator.destroy(table);
+}
 
-    for (0..NonTerminalCount) |non_terminal_index| {
-        for (0..TokenCount) |token_index| {
-            const rl = table[non_terminal_index][token_index];
+test "Test Parse" {
+    var first_sets = try constructFirstSets(testing.allocator); defer first_sets.deinit();
+    var follow_sets = try constructFollowSets(&first_sets, testing.allocator); defer follow_sets.deinit();
+    const table = try constructParseTable(&first_sets, &follow_sets, testing.allocator); defer testing.allocator.destroy(table);
 
-            if (rl == null) {
-                std.debug.print("---", .{});
-            } else {
-                std.debug.print("{d: >3}", .{rl.?});
-            }
-        }
-        std.debug.print("\n", .{});
-    }
+    
+    testing.log_level = .info;
+    var tokens = try TokenBuffer.init(1024, testing.allocator); defer tokens.deinit();
+    const test_inp = "module mymodule () {}";
+    try testing.expectEqual(test_inp.len, try tokeniser.tokenise(test_inp, &tokens));
+    try testing.expectEqual(null, try parse(table, tokens, testing.allocator));
 }
 
 //test "Debug: print rules" {
