@@ -32,14 +32,21 @@ statement = assignment_statement SS_semi_colon |
 if_statement = KW_if expr SS_open_brace statement_list SS_close_brace;
 assignment_statement = VL_variable SS_assign expr SS_semi_colon;
 
-expr = atomic_expr atom_follow expr_tail |
-         unary_op expr expr_tail;
-expr_tail = binary_op expr expr_tail | E;
-
-atom_follow = SS_open_bracket expr SS_close_bracket | E;
-atomic_expr = SS_open_parenthesis expr SS_close_parenthesis |
+expr = unary_op add_expr | terminal_expr equals_expr index_expr concat_expr shift_expr bitw_expr add_expr;
+add_expr = OP_add bitw_expr |
+           OP_subtract bitw_expr | E;
+bitw_expr = OP_and shift_expr |
+            OP_or shift_expr |
+            OP_xor shift_expr | E;
+shift_expr = OP_lsl concat_expr |
+             OP_lsr concat_expr | E;
+concat_expr = OP_concat index_expr | E;
+index_expr = SS_open_bracket expr SS_close_bracket | E;
+equals_expr = OP_equals terminal_expr | E;
+terminal_expr = SS_open_parenthesis expr SS_close_parenthesis |
                 VL_integer_literal |
                 VL_variable;
+
 unary_op = OP_and | OP_or | OP_negate | OP_xor;
 binary_op = OP_add | OP_subtract | OP_and |
              OP_or | OP_xor | OP_lsl |
