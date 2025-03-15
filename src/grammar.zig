@@ -138,6 +138,13 @@ const Rule = struct {
     fn add(self: *Rule, elem: RuleElement) void {
         if (elem == .token and elem.token == .PR_EMPTY) std.debug.assert(self.term_count == 0); //Can only have a single term if empty
         self.terms[self.term_count] = elem;
+        self.term_count += 1;
+    }
+    fn empty(self: Rule) bool {
+        return switch (self.terms[0].?) {
+            .rule => false,
+            .token => |t| t==.PR_EMPTY
+        };
     }
 };
 
@@ -195,45 +202,38 @@ fn constructFirstSets(alloc: std.mem.Allocator) !RuleTokenSet {
     var first_sets = RuleTokenSet.init(alloc);
 
     //Initialise sets to empty
-    for (0..RuleCount) |rule_index| {
+    for (0..NonTerminalCount) |non_terminal_index| {
         var set = std.EnumSet(Token).initEmpty();        
-
-        // Add empty token if this is a legitimate alternative
-        for (0..MaxAlternativeCount) |alternative_index| {
-            if (Rules[rule_index][alternative_index] == null) break;
-            if (Rules[rule_index][alternative_index].?.empty) {
-                set.insert(.PR_EMPTY);
-            }
+        for (AlternativeTable[non_terminal_index]) |alt_op| {
+            const alt = alt_op orelse break;
+            if (Rules[alt].empty()) set.insert(.PR_EMPTY);
         }
-
-        try first_sets.put(@enumFromInt(rule_index), set);
+        try first_sets.put(@enumFromInt(non_terminal_index), set);
     }
 
     var change = true;
     while (change) {
         change = false;
-        rules: for (0..RuleCount) |rule_index| {
-            const rule: RuleEnum = @enumFromInt(rule_index);
-            for (0..MaxAlternativeCount) |alternative_index| {
-                //If it's null then we've gone through all the alternatives
-                if (Rules[rule_index][alternative_index] == null) continue :rules;
-                const ra = Rules[rule_index][alternative_index].?;
-                if (ra.empty) continue;
+        for (0..NonTerminalCount) |non_terminal_index| {
+            const rule: RuleEnum = @enumFromInt(non_terminal_index);
+            var this_set = first_sets.get(rule) orelse unreachable;
 
-                var this_set = first_sets.get(rule) orelse unreachable;
+            for (AlternativeTable[non_terminal_index]) |alt_op| {
+                const alt = alt_op orelse break;
+                const ra = Rules[alt];
                 std.debug.assert(ra.term_count > 0);
+                if (ra.empty()) std.debug.assert(ra.term_count == 1);
 
                 //First set includes the first set of all terms where prior terms can be empty
                 terms: for (0..ra.term_count) |term_index| {
                     switch (ra.terms[term_index] orelse unreachable) {
                         .token => |t| {
-                            std.debug.assert(t != .PR_EMPTY); //TODO this can be allowed if we fix other stuff. It simplifies RuleAlternative as the empty case is just a token
                             if (!this_set.contains(t)) {
                                 this_set.insert(t);
                                 try first_sets.put(rule, this_set);
                                 change = true;
                             }
-                             //If we've seen a token then it must be terminal and we can disregard following ones. TODO: this won't be true if we allow PR_EMPTY in the grammar
+                             //If we've seen a token then it must be terminal and we can disregard following ones.
                             break :terms;
                         },
                         .rule => |r| {
@@ -266,28 +266,24 @@ fn constructFirstSets(alloc: std.mem.Allocator) !RuleTokenSet {
 fn constructFollowSets(first_sets: *RuleTokenSet, alloc: std.mem.Allocator) !RuleTokenSet {
     var follow_sets = RuleTokenSet.init(alloc);
 
-    //Initialise sets to empty
-    for (0..RuleCount) |rule_index| {
-        var set = std.EnumSet(Token).initEmpty();
-        const rule: RuleEnum = @enumFromInt(rule_index);
+    for (0..NonTerminalCount) |non_terminal_index| {
+        var set = std.EnumSet(Token).initEmpty();        
+        const rule: RuleEnum = @enumFromInt(non_terminal_index);
 
         if (rule == .module) { //module is the start symbol and therefore has the follow token of PR_END
             set.insert(.PR_END);
         }
-
         try follow_sets.put(rule, set);
     }
 
     var change = true;
     while (change) {
         change = false;
-        rules: for (0..RuleCount) |rule_index| {
-            const rule: RuleEnum = @enumFromInt(rule_index);
-            for (0..MaxAlternativeCount) |alternative_index| {
-                //If it's null then we've gone through all the alternatives
-                if (Rules[rule_index][alternative_index] == null) continue :rules;
-                const ra = Rules[rule_index][alternative_index].?;
-                if (ra.empty) continue;
+        for (0..NonTerminalCount) |non_terminal_index| {
+            const rule: RuleEnum = @enumFromInt(non_terminal_index);
+            for (AlternativeTable[non_terminal_index]) |alt_op| {
+                const alt = alt_op orelse break;
+                const ra = Rules[alt];
 
                 std.debug.assert(ra.term_count > 0);
 
@@ -438,8 +434,8 @@ test "Gen Parse Table" {
     defer first_sets.deinit();
 
 
-//    var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
-//    defer follow_sets.deinit();
+    var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
+    defer follow_sets.deinit();
 //
 //    printRuleTokenSet(&first_sets);
 //    std.debug.print("\n", .{});
