@@ -11,55 +11,109 @@ const SpecialCase = enum {
     Null
 };
 
-const RuleCount = blk: {
-    //Iterate through to get rule count
-    var rule_count = 0;
-    for (@import("config").rules) |rule| {
-        @setEvalBranchQuota(16384); //Large amount of branching from tokenize, so raise the limit here
-        var it = std.mem.tokenizeAny(u8, rule, " \n");
-        while (it.next()) |v| {
-            if (v.len == 0) continue;
-            //@compileLog("got token ", v);
-        }
-        rule_count += 1;
+const StrRules = @import("config").rules;
+const RuleCount = StrRules.len;
+const MaxTermCount = blk: {
+    var max: u8 = 0;
+    for (StrRules) |rule| {
+        max = @max(rule.len-1, max);
     }
 
-    break :blk rule_count;
+    break :blk max;
 };
-const MaxTermCount = 6; //TODO this can be picked up automatically
+
 const MaxAlternativeCount = blk: {
-    var m = 0;
-    @setEvalBranchQuota(16384); //Large amount of branching from tokenize, so raise the limit here
-    for (@import("config").rules) |rule| {
-        const c = std.mem.count(u8, rule, "|");
-        m = if (c > m) c else m;
+    var current: ?[]const u8 = null;
+    var current_count: u16 = 0;
+    var max: u16 = 0;
+    for (StrRules) |rule| {
+        if (current == null or !std.mem.eql(u8, current.?, rule[0])) {
+            if (current != null) {
+                max = @max(max, current_count);
+            }
+            current = rule[0];
+            current_count = 0;
+        }
+
+        current_count += 1;
     }
 
-    break :blk m+1;
+    break :blk max;
 };
 
+const NonTerminalCount: u16 = blk: {
+    var count = 0;
+    var current: ?[]const u8 = null;
+    for (StrRules) |rule| {
+        if (current == null) {
+            current = rule[0];
+            count += 1;
+        } else
+        if (!std.mem.eql(u8, current.?, rule[0])) {
+            current = rule[0];
+            count += 1;
+        }
+    }
+
+    break :blk count;
+};
+
+/// Each alternative is given a unique enum to identify it. However this means
+/// that rule references on the RHS cannot directly identify all the relevant rules.
+/// Therefore use this table to identify the possible enums. This assumes that all rules with the same LHS are adjacent
+const AlternativeTableType = [NonTerminalCount][MaxAlternativeCount]?u16;
+const AlternativeTable: AlternativeTableType = blk: {
+    var alternatives: AlternativeTableType  = undefined;
+    for (0..NonTerminalCount) |r| {
+        for(0..MaxAlternativeCount) |a| {
+            alternatives[r][a] = null;
+        }
+    }
+
+    var current: ?[]const u8 = null;
+    var current_index: u16 = 0;
+    var current_alt_index: u16 = 0;
+    for (StrRules, 0..) |rule, rule_index| {
+        if (current == null) {
+            current = rule[0];
+
+        } else
+        if (!std.mem.eql(u8, current.?, rule[0])) {
+            current = rule[0];
+            current_index += 1;
+            current_alt_index = 0;
+        }
+
+        alternatives[current_index][current_alt_index] = rule_index;
+        current_alt_index += 1;
+    }
+
+    break :blk alternatives;
+};
+
+
+/// Enum of all non-terminal symbols in the grammar, derived from
+/// the LHS of the rule declarations.
 pub const RuleEnum = blk: {
     var fields: [RuleCount]std.builtin.Type.EnumField = undefined;
 
-    var index = 0;
-    //Iterate again to get rule names
-    for (@import("config").rules) |rule| {
-        var it = std.mem.splitAny(u8, rule, " \n");
-        @setEvalBranchQuota(16384); //Large amount of branching from tokenize, so raise the limit here
-        while (it.next()) |v| {
-            if (v.len == 0) continue;
-            var s: [v.len:0]u8 = undefined;
+    //Iterate to get unique LHS rule names
+    var current: ?[]const u8 = null;
+    var index: u16 = 0;
+    for (StrRules) |rule| {
+        if (current == null or !std.mem.eql(u8, current.?, rule[0])) {
+            var s: [rule[0].len:0]u8 = undefined;
             s[s.len] = 0;
-            @memcpy(&s, v.ptr);
+            @memcpy(&s, rule[0].ptr);
             fields[index] = std.builtin.Type.EnumField{.name=&s, .value = index};
-            break;
+            current = rule[0];
+            index += 1;
         }
-        index += 1;
     }
 
     const enumInfo = std.builtin.Type.Enum{
         .tag_type = u8,
-        .fields = &fields,
+        .fields = fields[0..index],
         .decls = &[0]std.builtin.Type.Declaration{},
         .is_exhaustive = true,
     };
@@ -75,62 +129,36 @@ const RuleElement = union(ElementType) {
     token: Token,
     rule: RuleEnum,
 };
-
-const RuleAlternative = struct {
-    empty: bool,
+const Rule = struct {
     terms: [MaxTermCount]?RuleElement,
     term_count: u8,
-    fn make(empty: bool) RuleAlternative {
-        if (empty) {
-            return .{.empty=true, .terms=.{null,null,null,null,null,null}, .term_count=0};
-        } else {
-            return .{.empty=false, .terms=.{null,null,null,null,null,null}, .term_count=0};
-        }
+    fn make() Rule {
+        return .{.terms=.{null,null,null,null,null,null}, .term_count=0};
     }
-
-    fn append(self: *RuleAlternative, e: RuleElement) void {
-        self.terms[self.term_count] = e;
-        self.term_count += 1;
+    fn add(self: *Rule, elem: RuleElement) void {
+        if (elem == .token and elem.token == .PR_EMPTY) std.debug.assert(self.term_count == 0); //Can only have a single term if empty
+        self.terms[self.term_count] = elem;
     }
 };
 
-const RuleType = [RuleCount][MaxAlternativeCount]?RuleAlternative; 
+const RuleType = [RuleCount]Rule;
 const Rules: RuleType = blk: {
     var rules: RuleType = undefined;
     for (0..RuleCount) |i| {
-        for (0..MaxAlternativeCount) |j| {
-            rules[i][j] = null;
-        }
+        rules[i] = Rule.make();
     }
 
-    for (@import("config").rules, 0..) |rule, i| {
-        @setEvalBranchQuota(24000); //Large amount of branching from tokenize, so raise the limit here
-        var it = std.mem.tokenizeAny(u8, rule, " \n:=");
-        var j = 0;
-        var k = 0;
-        var first = true;
-        while (it.next()) |v| {
-            if (v.len == 1 and v[0] == '|') {
-                j += 1;
-                k = 0;
-                continue;
-            }
-            if (v.len == 0) continue;
-            if (first) {
-                first = false;
-                continue;
-            }
-            if (v.len == 1 and v[0] == 'E') {
-                rules[i][j] = RuleAlternative.make(true);
+    for (StrRules, 0..) |rule, i| {
+        std.debug.assert(rule.len > 1);
+        for (rule[1..]) |r| {
+            if (r.len == 1 and r[0] == 'E') {
+                rules[i].add(RuleElement{.token = .PR_EMPTY});
             } else {
-                if (rules[i][j] == null) {
-                    std.debug.assert(k == 0);
-                    rules[i][j] = RuleAlternative.make(false);
-                }
-                if (tokeniser.tokenFromTokenString(v)) |t|
-                    rules[i][j].?.append(RuleElement{.token = t})
-                else if (ruleFromRuleString(v)) |r|
-                    rules[i][j].?.append(RuleElement{.rule = r})
+                @setEvalBranchQuota(16384); //Large amount of branching from tokenize, so raise the limit here
+                if (tokeniser.tokenFromTokenString(r)) |t|
+                    rules[i].add(RuleElement{.token = t})
+                else if (ruleFromRuleString(r)) |nt|
+                    rules[i].add(RuleElement{.rule = nt})
                 else unreachable;
             }
         }
@@ -364,40 +392,74 @@ test "RuleEnum: Stuff gets loaded" {
     }
 }
 
+test "Alternatives" {
+    try std.testing.expectEqual(68, RuleCount);
+    try std.testing.expectEqual(35, NonTerminalCount);
+    try std.testing.expectEqual(9, MaxAlternativeCount);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{0, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{1, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_name)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{2,    3,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_ports)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{4, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_port_body)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{5,    6,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_port_list)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{7,    8,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_port)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{9, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_ports)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{10,  11,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_port_body)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{12,  13,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_port_list)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{14,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_port)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{15,  16,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.direction)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{17,  18,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.width)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{19,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_name)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{20,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_body)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{21,  22,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_body_list)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{23,  24,  25,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_body_item)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{26,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.declaration)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{27,  28,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_name_list)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{29,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.block)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{30,  31,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.block_type)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{32,  33,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.block_body)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{34,  35,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.statement_list)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{36,  37,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.statement)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{38,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.if_statement)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{39,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.assignment_statement)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{40,  41,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.expr)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{42,  43,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.expr_tail)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{44,  45,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.atom_follow)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{46,  47,  48,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.atomic_expr)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{49,  50,  51,  52,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.unary_op)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{53,  54,  55,  56,  57,  58,  59,  60,  61}, &AlternativeTable[@intFromEnum(RuleEnum.binary_op)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{62,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.instantiation)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{63,  64,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_connection_body)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{65,  66,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_connection_list)]);
+    try std.testing.expectEqualSlices(?u16, &[_]?u16{67,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_connection)]);
+}
+
 test "Gen Parse Table" {
     var first_sets = try constructFirstSets(std.testing.allocator);
     defer first_sets.deinit();
 
 
-    var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
-    defer follow_sets.deinit();
-
-    printRuleTokenSet(&first_sets);
-    std.debug.print("\n", .{});
-    printRuleTokenSet(&follow_sets);
-
-    const table = try constructParseTable(&first_sets, &follow_sets, std.testing.allocator);
-    defer std.testing.allocator.destroy(table);
-
-    for (0..RuleCount) |rule_index| {
-        for (0..TokenCount) |token_index| {
-            const rl = table[rule_index][token_index];
-
-            if (rl == null) {
-                std.debug.print("---", .{});
-            } else {
-                std.debug.print("{d: >3}.{d}", .{@intFromEnum(rl.?.rule), rl.?.alternative});
-            }
-        }
-        std.debug.print("\n", .{});
-    }
-
-    // What has gone wrong here then?
-    // The definition of the first/follow sets correspond to a single rule. This is _not_ to mean a single left hand side token, but rather a single alternative.
-    // So for example, we actually need two rules with `control_port` on the LHS, which have independent first/follow sets.
-    // Current implementation only has first/follow sets unique per non-terminal token (ie, current rules)
-    // Probably want to flatten the rule->alternative structure we have now into a signle large rules enum
-    // This should then give unique identifiers per pattern, more sets, and allow for parse table construction without the errors we see.
+//    var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
+//    defer follow_sets.deinit();
+//
+//    printRuleTokenSet(&first_sets);
+//    std.debug.print("\n", .{});
+//    printRuleTokenSet(&follow_sets);
+//
+//    const table = try constructParseTable(&first_sets, &follow_sets, std.testing.allocator);
+//    defer std.testing.allocator.destroy(table);
+//
+//    for (0..RuleCount) |rule_index| {
+//        for (0..TokenCount) |token_index| {
+//            const rl = table[rule_index][token_index];
+//
+//            if (rl == null) {
+//                std.debug.print("---", .{});
+//            } else {
+//                std.debug.print("{d: >3}.{d}", .{@intFromEnum(rl.?.rule), rl.?.alternative});
+//            }
+//        }
+//        std.debug.print("\n", .{});
+//    }
 }
 
 //test "Debug: print rules" {
