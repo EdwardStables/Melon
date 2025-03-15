@@ -332,39 +332,32 @@ fn constructFollowSets(first_sets: *RuleTokenSet, alloc: std.mem.Allocator) !Rul
 }
 
 const TokenCount = @typeInfo(Token).@"enum".fields.len;
-const RuleIndex = struct{rule: RuleEnum, alternative: u8,};
-const ParseTable = [RuleCount][TokenCount]?RuleIndex;
-
+const ParseTable = [NonTerminalCount][TokenCount]?u16;
 
 fn constructParseTable(first_sets: *RuleTokenSet, follow_sets: *RuleTokenSet, alloc: std.mem.Allocator) !*ParseTable{
     var table: *ParseTable = try alloc.create(ParseTable);
-    for (0..RuleCount) |rule_index| {
+    for (0..NonTerminalCount) |non_terminal_index| {
         for (0..TokenCount) |token_index| {
-            const rule: RuleEnum = @enumFromInt(rule_index);
+            const rule: RuleEnum = @enumFromInt(non_terminal_index);
             const token: Token = @enumFromInt(token_index);
             const follow = follow_sets.get(rule) orelse unreachable;
 
-            table[rule_index][token_index] = null;
+            table[non_terminal_index][token_index] = null;
 
-            for (0..RuleCount) |next_rule_index| {
-                const next_rule: RuleEnum = @enumFromInt(next_rule_index);
-                for (0..MaxAlternativeCount) |next_alternative_index| {
-                    const alt = Rules[next_rule_index][next_alternative_index];
-                    if (alt == null) break;
-                    if (alt.?.empty) continue;
+            for (AlternativeTable[non_terminal_index]) |alt_op| {
+                const alternative = alt_op orelse break;
 
-                    const first = switch (alt.?.terms[0] orelse unreachable) {
-                        .token => |t| std.EnumSet(Token).initOne(t),
-                        .rule => |r| first_sets.get(r) orelse unreachable,
-                    };
+                const first = switch (Rules[alternative].terms[0] orelse unreachable) {
+                    .token => |t| std.EnumSet(Token).initOne(t),
+                    .rule => |r| first_sets.get(r) orelse unreachable,
+                };
 
-                    if (first.contains(token) or (first.contains(.PR_EMPTY) and follow.contains(token))) {
-                        //This should be an LL(1) grammar, if there has already been an entry then there is a bug in the parser or the grammar itself
-                        std.debug.print("{} {} {} ", .{rule, token, next_rule});
-                        std.debug.print("{} {}\n", .{first.contains(token), (first.contains(.PR_EMPTY) and follow.contains(token))});
-                        std.debug.assert(table[rule_index][token_index] == null);
-                        table[rule_index][token_index] = .{.rule=next_rule, .alternative=@intCast(next_alternative_index)};
-                    }
+                if (first.contains(token) or (first.contains(.PR_EMPTY) and follow.contains(token))) {
+                    //This should be an LL(1) grammar, if there has already been an entry then there is a bug in the parser or the grammar itself
+                    std.debug.print("{} {} {} ", .{rule, token, alternative});
+                    std.debug.print("{} {}\n", .{first.contains(token), (first.contains(.PR_EMPTY) and follow.contains(token))});
+                    std.debug.assert(table[non_terminal_index][token_index] == null);
+                    table[non_terminal_index][token_index] = alternative;
                 }
             }
         }
@@ -436,26 +429,26 @@ test "Gen Parse Table" {
 
     var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
     defer follow_sets.deinit();
-//
-//    printRuleTokenSet(&first_sets);
-//    std.debug.print("\n", .{});
-//    printRuleTokenSet(&follow_sets);
-//
-//    const table = try constructParseTable(&first_sets, &follow_sets, std.testing.allocator);
-//    defer std.testing.allocator.destroy(table);
-//
-//    for (0..RuleCount) |rule_index| {
-//        for (0..TokenCount) |token_index| {
-//            const rl = table[rule_index][token_index];
-//
-//            if (rl == null) {
-//                std.debug.print("---", .{});
-//            } else {
-//                std.debug.print("{d: >3}.{d}", .{@intFromEnum(rl.?.rule), rl.?.alternative});
-//            }
-//        }
-//        std.debug.print("\n", .{});
-//    }
+
+    printRuleTokenSet(&first_sets);
+    std.debug.print("\n", .{});
+    printRuleTokenSet(&follow_sets);
+
+    const table = try constructParseTable(&first_sets, &follow_sets, std.testing.allocator);
+    defer std.testing.allocator.destroy(table);
+
+    for (0..RuleCount) |rule_index| {
+        for (0..TokenCount) |token_index| {
+            const rl = table[rule_index][token_index];
+
+            if (rl == null) {
+                std.debug.print("---", .{});
+            } else {
+                std.debug.print("{d: >3}", .{rl.?});
+            }
+        }
+        std.debug.print("\n", .{});
+    }
 }
 
 //test "Debug: print rules" {
