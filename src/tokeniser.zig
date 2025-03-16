@@ -258,8 +258,8 @@ const MultiCharToken = struct {
 };
 
 fn readMultiCharToken(trial_token: []const u8) !MultiCharToken {
-    const keywords = [_][]const u8{ "signal", "proc", "comb", "input", "output", "module" };
-    const tokens = [_]Token{ .KW_signal, .KW_proc, .KW_comb, .KW_input, .KW_output, .KW_module};
+    const keywords = [_][]const u8{ "signal", "proc", "comb", "input", "output", "module", "if" };
+    const tokens = [_]Token{ .KW_signal, .KW_proc, .KW_comb, .KW_input, .KW_output, .KW_module, .KW_if};
     assert(keywords.len == tokens.len); //Make sure we don't make an error while editing
 
     for (keywords, tokens) |kwd, tk| {

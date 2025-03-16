@@ -24,13 +24,13 @@ signal_name_list = SS_comma signal_name signal_name_list | E;
 block = block_type block_body;
 block_type = KW_proc | KW_comb;
 block_body = SS_open_brace statement_list SS_close_brace |
-               statement;
+             statement;
 statement_list = statement statement_list | E;
 
 statement = assignment_statement SS_semi_colon |
               if_statement;
 if_statement = KW_if expr SS_open_brace statement_list SS_close_brace;
-assignment_statement = VL_variable SS_assign expr SS_semi_colon;
+assignment_statement = VL_variable SS_assign expr;
 
 expr = add_expr;
 add_expr = bitw_expr add_tail;

@@ -566,7 +566,6 @@ test "Test Bad Expr Parses" {
 
 test "Module Good Parses" {
     try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
-    testing.log_level = .info; //Don't print errors for bad inputs
     try testing.expectEqual(null, try runParseTest( "module mymodule [+clk] () {}", .{ .rule = .module }));
     try testing.expectEqual(null, try runParseTest( "module mymodule [+clk,-resetn] () {}", .{ .rule = .module }));
     try testing.expectEqual(null, try runParseTest( "module mymodule [+clk,+clk,+clk] () {}", .{ .rule = .module })); //Semantically might not be right, but syntactically fine
@@ -580,4 +579,10 @@ test "Module Bad Parses" {
     try testing.expectEqual(3, try runParseTest( "module mymodule [^clk] () {}", .{ .rule = .module })); //terms in [] need +- signifiers
 }
 
+test "Block" {
+    testing.log_level = .debug; //Don't print errors for bad inputs
+    try testing.expectEqual(null, try runParseTest( "proc x = y;", .{ .rule = .block }));
+    try testing.expectEqual(null, try runParseTest( "comb x = y;", .{ .rule = .block }));
+    try testing.expectEqual(null, try runParseTest( "proc {x = y;\nif &a {x = x << x;}}", .{ .rule = .block }));
+}
 
