@@ -553,12 +553,15 @@ test "Test Good Expr Parses" {
     try testing.expectEqual(null, try runParseTest( "13'b0 <= var", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "13'b0 <= var ++ var2 + var3 ", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "var[a]", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "~var[a]", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "^x+ &y+z", .{ .rule = .expr }));
 }
     
 test "Test Bad Expr Parses" {
     testing.log_level = .err; //Don't print errors for bad inputs
     try testing.expectEqual(2, try runParseTest( "13'b0 <<", .{ .rule = .expr }));
     try testing.expectEqual(4, try runParseTest( "var[a][b]", .{ .rule = .expr })); //Multidimensional arrays not supported
+    try testing.expectEqual(3, try runParseTest( "^x- -y+z", .{ .rule = .expr }));
 }
 
 test "Module parse" {
