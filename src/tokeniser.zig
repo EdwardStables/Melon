@@ -75,16 +75,18 @@ pub const Token = enum {
 
     //Valued,
     VL_variable, // a-zA-Z0-9_
-    VL_integer_literal, // Widthless binary: 0 or 1
+    VL_integer, //32 bit unsigned integer. Not specified with a width, used for loops (not implemented) widths, and parameters (not implemented). Not for literals.
+    VL_sized_number, //Integral number of any width (implementation currently limits to 256 bits width and max u64 value). Always specified with width.
 
     //Special symbols used by parser, can never actually be tokenised from input
     PR_EMPTY,
     PR_END,
 };
 
-const IntegerWithWidth = struct { //TODO needs to be arbitrary
+const SizedNumber = struct { //TODO needs to be arbitrary
     val: u64,
     width: u8,
+    integer: bool //Indicates a base-10 32 bit value
 };
 
 const Location = struct {
@@ -96,7 +98,7 @@ pub const TokenBuffer = struct {
     tokens: []Token,
     locations: []Location,
     variable_values: []?[]const u8,
-    integer_literal_values: []?IntegerWithWidth,
+    integer_literal_values: []?SizedNumber,
     size: u32,
     capacity: u32,
     allocator: std.mem.Allocator,
@@ -108,7 +110,7 @@ pub const TokenBuffer = struct {
             .tokens = try alloc.alloc(Token, capacity),
             .locations = try alloc.alloc(Location, capacity),
             .variable_values = try alloc.alloc(?[]const u8, capacity),
-            .integer_literal_values = try alloc.alloc(?IntegerWithWidth, capacity),
+            .integer_literal_values = try alloc.alloc(?SizedNumber, capacity),
             .size = 0,
             .capacity = capacity,
             .allocator = alloc,
@@ -126,7 +128,7 @@ pub const TokenBuffer = struct {
         self.size = 0;
     }
 
-    fn add(self: *Self, token: Token, loc: Location, variable: ?[] const u8, value: ?IntegerWithWidth) !void {
+    fn add(self: *Self, token: Token, loc: Location, variable: ?[] const u8, value: ?SizedNumber) !void {
         if (self.size == self.capacity) {
             return error.FullBuffer;
         }
@@ -140,7 +142,7 @@ pub const TokenBuffer = struct {
     }
 
     pub fn addToken(self: *Self, loc: Location, token: Token) !void {
-        if (token == .VL_variable or token == .VL_integer_literal)
+        if (token == .VL_variable or token == .VL_sized_number or token == .VL_integer)
             return error.InternalTokeniserError;
         try self.add(token, loc, null, null);
     }
@@ -149,14 +151,15 @@ pub const TokenBuffer = struct {
         try self.add(.VL_variable, loc, variable, null);
     }
 
-    pub fn addLiteral(self: *Self, loc: Location, value: IntegerWithWidth) !void {
-        try self.add(.VL_integer_literal, loc, null, value);
+    pub fn addLiteral(self: *Self, loc: Location, token: Token, value: SizedNumber) !void {
+        std.debug.assert(token == .VL_integer or token == .VL_sized_number) ;
+        try self.add(token, loc, null, value);
     }
 };
 
 fn isSingleCharacterToken(c: u8) bool {
     return switch (c) {
-        ',','{', '}', '[', ']', '(', ')', ';', '=', '<', '>', '+', '-', '&', '|', '^', '~', '#' => true,
+        '.', ',','{', '}', '[', ']', '(', ')', ';', '=', '<', '>', '+', '-', '&', '|', '^', '~', '#' => true,
         else => false,
     };
 }
@@ -170,91 +173,93 @@ fn isTokenDelimiter(c: u8) bool {
     };
 }
 
-fn readLiteralToken(trial_token: []const u8) !IntegerWithWidth {
-    var width: ?u8 = null;
-    var apostrophe: usize = 0;
-
-    //Find width first
-    if (trial_token[0] != '\'') {
-        for (trial_token, 0..) |c, i| {
-            if (c == '\'') {
-                apostrophe = i;
-                width = std.fmt.parseInt(u8, trial_token[0..i], 10) catch |err| {
-                    if (err == error.Overflow) {
-                        log.err("Maximum signal width currently limited to 255", .{});
-                        return err;
-                    }
-                    unreachable;
-                };
-                break;
-            } else if (c >= '0' and c <= '9') {
-                //do nothing
-            } else {
-                log.err("Unexpected character '{}' found while parsing literal width", .{ c });
-                return error.MalformedToken;
-            }
-        } else {
-            log.err("Could not find width delimited ' while parsing literal value", .{});
-            return error.MalformedToken;
+fn readLiteralToken(trial_token: []const u8) !SizedNumber {
+    const apostrophe: ?u8 =
+    for (trial_token, 0..) |c, i| {
+        if (c == '\'') {
+            break @intCast(i);
         }
+    } else null;
+
+    //Only allowed for integers
+    if (apostrophe == null) {
+        const value = std.fmt.parseInt(u32, trial_token, 10) catch |err| switch (err) {
+            error.Overflow => {
+                log.err("Integer literals are 32 bit values. Literal value {s} is too large", .{trial_token});
+                return err;
+            },
+            error.InvalidCharacter => {
+                log.err("Integer literals must be in base 10. Literal value {s} contains an invalid character", .{trial_token});
+                return err;
+            }
+        };
+
+        return .{.val = value, .width=32, .integer=true};
     }
 
-    if (apostrophe == trial_token.len - 1) {
+    const width: ?u8 = if (apostrophe.? == 0) null
+    else std.fmt.parseInt(u8, trial_token[0..apostrophe.?], 10) catch |err| switch (err) {
+        error.Overflow => {
+            log.err("Widths are currently limited to 8 bits. Width specifier {s} is too large", .{trial_token[0..apostrophe.?]});
+            return err;
+        },
+        error.InvalidCharacter => {
+            log.err("Width specifiers must be in base 10. Value {s} contains an invalid character", .{trial_token[0..apostrophe.?]});
+            return err;
+        }
+    };
+
+    if (apostrophe.? == trial_token.len-1) {
         log.err("Literal declaration lacks base specifier and value", .{});
         return error.MalformedToken;
     }
 
-    const base_char: u8 = trial_token[apostrophe + 1];
-    if (base_char != 'b' and base_char != 'h' and base_char != 'd') {
-        log.err("Literal declaration base specifier must be one of h, d, or b. Found value '{}'", .{ base_char});
-        return error.MalformedToken;
-    }
-
-    const value_start = apostrophe + 2;
-    const base: u8 = switch (base_char) {
+    const base: u8 = switch (trial_token[apostrophe.?+1]) {
         'h' => 16,
         'd' => 10,
         'b' => 2,
-        else => unreachable,
+        else => |c| {
+            log.err("Literal declaration base specifier must be one of h, d, or b. Found value '{}'", .{c});
+            return error.MalformedToken;
+        }
     };
 
-    if (value_start == trial_token.len) {
-        log.err("Literal declaration lacks value", .{});
+    if (apostrophe.? + 1 == trial_token.len-1) {
+        log.err("Literal declaration lacks value after base specifier", .{});
         return error.MalformedToken;
     }
 
-    const val = std.fmt.parseInt(u64, trial_token[value_start..], base) catch |err| {
-        if (err == error.Overflow) {
-            log.err("Maximum signal value size currently limited to 64 bits", .{});
+    const value = std.fmt.parseInt(u64, trial_token[apostrophe.?+2..], base) catch |err| switch (err) {
+        error.Overflow => {
+            log.err("Literal values are currently limited to 64 bits. Literal is too large", .{});
+            return err;
+        },
+        error.InvalidCharacter => {
+            log.err("Literal is base {}. Value contains an invalid character", .{base});
             return err;
         }
-        if (err == error.InvalidCharacter) {
-            log.err("Found unexpected character while parsing base {} value {s} bits", .{ base, trial_token[value_start..]});
-            return err;
-        }
-        unreachable;
     };
 
     const floor = std.math.floor;
     const log2 = std.math.log2;
-    const required_width = if (val == 0) 1 else blk: {
-        const float_bits = floor(log2(@as(f32, @floatFromInt(val))));
+    const required_width = if (value == 0) 1 else blk: {
+        const float_bits = floor(log2(@as(f32, @floatFromInt(value))));
         break :blk @as(u8, @intFromFloat(float_bits)) + 1;
     };
-    if (width == null) {
-        width = required_width;
-    } else if (width.? < required_width) {
-        log.err("Value {} requires signal width of {}, but width was specified as {}", .{ val, required_width, width.?});
-        return error.LiteralWidthError;
-    }
 
-    return .{ .val = val, .width = width orelse unreachable };
+    const actual_width = if (width == null) required_width
+    else if (width.? < required_width) {
+        log.err("Value {} requires signal width of {}, but width was specified as {}", .{ value, required_width, width.?});
+        return error.LiteralWidthError;
+    } else width.?;
+
+    return .{.val = value, .width=actual_width, .integer=false};
 }
 
 const MultiCharToken = struct {
     token: Token,
     variable: ?[]const u8,
-    value: ?IntegerWithWidth,
+    value: ?SizedNumber,
 };
 
 fn readMultiCharToken(trial_token: []const u8) !MultiCharToken {
@@ -271,8 +276,9 @@ fn readMultiCharToken(trial_token: []const u8) !MultiCharToken {
     //number
     //Starts with a number (value or width) or apostrophe
     if (trial_token[0] == '\'' or (trial_token[0] >= '0' and trial_token[0] <= '9')) {
-        const vww = try readLiteralToken(trial_token);
-        return .{.token=.VL_integer_literal, .variable=null, .value=vww};
+        const literal = try readLiteralToken(trial_token);
+        const token: Token = if (literal.integer) .VL_integer else .VL_sized_number;
+        return .{.token=token, .variable=null, .value=literal};
     }
 
     //some variable
@@ -352,7 +358,7 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenBuffer) !u32 {
             const loc: Location = .{.column = multi_char_token_start_index, .line = line};
             switch (mct.token) {
                 .VL_variable => try token_buffer.addVariable(loc, mct.variable.?),
-                .VL_integer_literal => try token_buffer.addLiteral(loc, mct.value.?),
+                .VL_sized_number, .VL_integer => try token_buffer.addLiteral(loc, mct.token, mct.value.?),
                 else => try token_buffer.addToken(loc, mct.token),
             }
             state = .Idle;
@@ -375,6 +381,7 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenBuffer) !u32 {
                 '{' => try token_buffer.addToken(loc, .SS_open_brace),
                 '}' => try token_buffer.addToken(loc, .SS_close_brace),
                 ',' => try token_buffer.addToken(loc, .SS_comma),
+                '.' => try token_buffer.addToken(loc, .OP_dot),
                 '[' => try token_buffer.addToken(loc, .SS_open_bracket),
                 ']' => try token_buffer.addToken(loc, .SS_close_bracket),
                 '(' => try token_buffer.addToken(loc, .SS_open_parenthesis),
@@ -436,25 +443,36 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenBuffer) !u32 {
 }
 
 test "Literal: Single bit parsing" {
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken("1'd0"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken("1'd1"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken("'d0"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken("'d1"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken("1'h0"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken("1'h1"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken("'h0"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken("'h1"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken("1'b0"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken("1'b1"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0, .width = 1 }, readLiteralToken("'b0"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1, .width = 1 }, readLiteralToken("'b1"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0, .width = 1, .integer=false}, try readLiteralToken("1'd0"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1, .width = 1, .integer=false}, try readLiteralToken("1'd1"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0, .width = 1, .integer=false}, try readLiteralToken("'d0"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1, .width = 1, .integer=false}, try readLiteralToken("'d1"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0, .width = 1, .integer=false}, try readLiteralToken("1'h0"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1, .width = 1, .integer=false}, try readLiteralToken("1'h1"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0, .width = 1, .integer=false}, try readLiteralToken("'h0"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1, .width = 1, .integer=false}, try readLiteralToken("'h1"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0, .width = 1, .integer=false}, try readLiteralToken("1'b0"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1, .width = 1, .integer=false}, try readLiteralToken("1'b1"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0, .width = 1, .integer=false}, try readLiteralToken("'b0"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1, .width = 1, .integer=false}, try readLiteralToken("'b1"));
+}
+
+test "Literal: Integer parsing" {
+    //Various correct forms
+    try testing.expectEqualDeep(SizedNumber{ .val = 7, .width = 32, .integer=true }, try readLiteralToken("7"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 8, .width = 32, .integer=true }, try readLiteralToken("8"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 5, .width = 32, .integer=true }, try readLiteralToken("5"));
+
+    //Invalid values
+    testing.log_level = .err;
+    try testing.expectError(error.InvalidCharacter, readLiteralToken("1f231"));
 }
 
 test "Literal: Binary parsing" {
     //Various correct forms
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 7, .width = 3 }, readLiteralToken("'b00111"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 8, .width = 4 }, readLiteralToken("'b01000"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 5, .width = 10 }, readLiteralToken("10'b00101"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 7, .width = 3, .integer=false }, try readLiteralToken("'b00111"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 8, .width = 4, .integer=false }, try readLiteralToken("'b01000"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 5, .width = 10, .integer=false }, try readLiteralToken("10'b00101"));
 
     //Invalid values
     testing.log_level = .err;
@@ -464,9 +482,9 @@ test "Literal: Binary parsing" {
 
 test "Literal: Decimal parsing" {
     //Various correct forms
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 109, .width = 7 }, readLiteralToken("'d109"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 123, .width = 7 }, readLiteralToken("'d0123"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 1023, .width = 10 }, readLiteralToken("10'd1023"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 109, .width = 7, .integer=false }, try readLiteralToken("'d109"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 123, .width = 7, .integer=false }, try readLiteralToken("'d0123"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 1023, .width = 10, .integer=false }, try readLiteralToken("10'd1023"));
 
     //Invalid values
     testing.log_level = .err;
@@ -476,10 +494,10 @@ test "Literal: Decimal parsing" {
 
 test "Literal: Hex parsing" {
     //Various correct forms
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x109, .width = 9 }, readLiteralToken("'h109"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x123, .width = 9 }, readLiteralToken("'h0123"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x0321, .width = 16 }, readLiteralToken("16'h0321"));
-    try testing.expectEqualDeep(IntegerWithWidth{ .val = 0x0321, .width = 10 }, readLiteralToken("10'h321"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0x109, .width = 9, .integer=false }, try readLiteralToken("'h109"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0x123, .width = 9, .integer=false }, readLiteralToken("'h0123"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0x0321, .width = 16, .integer=false }, readLiteralToken("16'h0321"));
+    try testing.expectEqualDeep(SizedNumber{ .val = 0x0321, .width = 10, .integer=false }, readLiteralToken("10'h321"));
 
     //Invalid values
     testing.log_level = .err;
@@ -490,8 +508,8 @@ test "Literal: Hex parsing" {
 test "Literal: Malformed structure errors" {
     //Invalid values
     testing.log_level = .err;
-    try testing.expectError(error.MalformedToken, readLiteralToken("10h3ff"));
-    try testing.expectError(error.MalformedToken, readLiteralToken("1d'h3ff"));
+    try testing.expectError(error.InvalidCharacter, readLiteralToken("10h3ff"));
+    try testing.expectError(error.InvalidCharacter, readLiteralToken("1d'h3ff"));
     try testing.expectError(error.MalformedToken, readLiteralToken("10'3ff"));
 }
 
@@ -505,9 +523,9 @@ test "MultiCharTokeniser: keywords" {
 }
 
 test "MultiCharTokeniser: values" {
-    try testing.expectEqual(MultiCharToken{ .token = .VL_integer_literal, .value = .{.val=0x123, .width=9}, .variable = null }, readMultiCharToken("9'h123"));
-    try testing.expectEqual(MultiCharToken{ .token = .VL_integer_literal, .value = .{.val=0x123, .width=9}, .variable = null }, readMultiCharToken("'h123"));
-    try testing.expectEqual(MultiCharToken{ .token = .VL_integer_literal, .value = .{.val=0x123, .width=10}, .variable = null }, readMultiCharToken("10'h123"));
+    try testing.expectEqual(MultiCharToken{ .token = .VL_sized_number, .value = .{.val=0x123, .width=9, .integer = false}, .variable = null }, readMultiCharToken("9'h123"));
+    try testing.expectEqual(MultiCharToken{ .token = .VL_sized_number, .value = .{.val=0x123, .width=9, .integer = false}, .variable = null }, readMultiCharToken("'h123"));
+    try testing.expectEqual(MultiCharToken{ .token = .VL_sized_number, .value = .{.val=0x123, .width=10, .integer = false}, .variable = null }, readMultiCharToken("10'h123"));
 }
 
 test "MultiCharTokeniser: variables" {
@@ -544,12 +562,12 @@ fn expectEqualStringSlice(expected: []const ?[]const u8, actual: []const ?[]cons
     }
 }
 
-fn expectEqualTokens(input: []const u8, tokens: []const Token, variables: []const ?[]const u8, values: []const ?IntegerWithWidth) !void {
+fn expectEqualTokens(input: []const u8, tokens: []const Token, variables: []const ?[]const u8, values: []const ?SizedNumber) !void {
     var buffer = try TokenBuffer.init(1024, std.testing.allocator); defer buffer.deinit();
     const consumed = try tokenise(input, &buffer);
 
     try testing.expectEqual(input.len, consumed);
-    try testing.expectEqualSlices(?IntegerWithWidth, values, buffer.integer_literal_values[0..tokens.len]);
+    try testing.expectEqualSlices(?SizedNumber, values, buffer.integer_literal_values[0..tokens.len]);
     try expectEqualStringSlice(variables, buffer.variable_values[0..tokens.len]);
     try testing.expectEqualSlices(Token, tokens, buffer.tokens[0..tokens.len]);
 }    
@@ -559,7 +577,7 @@ test "Tokeniser: single keyword" {
     const inp = "module";
     const exp_tok = [_]Token{.KW_module};
     const exp_var = [_]?[]const u8{null};
-    const exp_val = [_]?IntegerWithWidth{null};
+    const exp_val = [_]?SizedNumber{null};
 
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
@@ -568,7 +586,7 @@ test "Tokeniser: single keyword with comment" {
     const inp = "module #and a comment";
     const exp_tok = [_]Token{.KW_module};
     const exp_var = [_]?[]const u8{null};
-    const exp_val = [_]?IntegerWithWidth{null};
+    const exp_val = [_]?SizedNumber{null};
 
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
@@ -578,16 +596,16 @@ test "Tokeniser: multiple keywords" {
     
     const exp_tok = [_]Token{.KW_module, .KW_input, .KW_output, .KW_signal, .KW_proc, .KW_comb};
     const exp_var = [_]?[]const u8{null,null,null,null,null,null};
-    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null};
+    const exp_val = [_]?SizedNumber{null,null,null,null,null,null};
 
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 test "Tokeniser: mix of tokens" {
-    const inp = "module {signal ['d1] abc;}";
+    const inp = "module {signal ['d1] abc 123;}";
     
-    const exp_tok = [_]Token{.KW_module, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
-    const exp_var = [_]?[]const u8{null,null,null,null,null,null,"abc",null,null};
-    const exp_val = [_]?IntegerWithWidth{null,null,null,null,.{.val=1,.width=1},null,null,null,null};
+    const exp_tok = [_]Token{.KW_module, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_sized_number, .SS_close_bracket, .VL_variable, .VL_integer, .SS_semi_colon, .SS_close_brace};
+    const exp_var = [_]?[]const u8{null,null,null,null,null,null,"abc",null,null,null};
+    const exp_val = [_]?SizedNumber{null,null,null,null,.{.val=1,.width=1,.integer=false},null,null,.{.val=123,.width=32,.integer=true},null,null};
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 
@@ -598,7 +616,7 @@ test "Tokeniser: special case tokens" {
                              .OP_lsl, .OP_lte, .OP_lt,
                              .OP_lsr, .OP_gte, .OP_gt};
     const exp_var = [_]?[]const u8{null,null,null,null,null,null,null,null,null,null};
-    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null,null,null,null,null};
+    const exp_val = [_]?SizedNumber{null,null,null,null,null,null,null,null,null,null};
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 
@@ -606,13 +624,13 @@ test "Tokeniser: mix of tokens and newlines/comments" {
     const inp = 
 \\module modmod { #module is called modmod
 \\    # We need to modify the syntax to not require widthed integers in signals
-\\    signal ['d1] abc;
+\\    signal [2] abc;
 \\}
 ;
     
-    const exp_tok = [_]Token{.KW_module, .VL_variable, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer_literal, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
+    const exp_tok = [_]Token{.KW_module, .VL_variable, .SS_open_brace, .KW_signal, .SS_open_bracket, .VL_integer, .SS_close_bracket, .VL_variable, .SS_semi_colon, .SS_close_brace};
     const exp_var = [_]?[]const u8{null,"modmod",null,null,null,null,null,"abc",null,null};
-    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,.{.val=1,.width=1},null,null,null,null};
+    const exp_val = [_]?SizedNumber{null,null,null,null,null,.{.val=2,.width=32, .integer=true},null,null,null,null};
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 
@@ -621,34 +639,34 @@ test "Tokeniser: fill small buffer" {
     const token1 = [_]Token{.KW_module};
     const token2 = [_]Token{.OP_add};
     const variables = [_]?[]const u8{null};
-    const values = [_]?IntegerWithWidth{null};
+    const values = [_]?SizedNumber{null};
 
     var buffer = try TokenBuffer.init(1, std.testing.allocator); defer buffer.deinit();
 
     var consumed = try tokenise(input, &buffer);
     try testing.expectEqual(7, consumed);
-    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try testing.expectEqualSlices(?SizedNumber, &values, buffer.integer_literal_values[0..1]);
     try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
     try testing.expectEqualSlices(Token, &token1, buffer.tokens[0..1]);
     buffer.clear();
 
     consumed += try tokenise(input[consumed..], &buffer);
     try testing.expectEqual(13, consumed);
-    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try testing.expectEqualSlices(?SizedNumber, &values, buffer.integer_literal_values[0..1]);
     try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
     try testing.expectEqualSlices(Token, &token1, buffer.tokens[0..1]);
     buffer.clear();
 
     consumed += try tokenise(input[consumed..], &buffer);
     try testing.expectEqual(14, consumed);
-    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try testing.expectEqualSlices(?SizedNumber, &values, buffer.integer_literal_values[0..1]);
     try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
     try testing.expectEqualSlices(Token, &token2, buffer.tokens[0..1]);
     buffer.clear();
 
     consumed += try tokenise(input[consumed..], &buffer);
     try testing.expectEqual(26, consumed);
-    try testing.expectEqualSlices(?IntegerWithWidth, &values, buffer.integer_literal_values[0..1]);
+    try testing.expectEqualSlices(?SizedNumber, &values, buffer.integer_literal_values[0..1]);
     try expectEqualStringSlice(&variables, buffer.variable_values[0..1]);
     try testing.expectEqualSlices(Token, &token1, buffer.tokens[0..1]);
 }

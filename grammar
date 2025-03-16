@@ -11,7 +11,7 @@ signal_port_body = signal_port signal_port_list | E;
 signal_port_list = SS_comma signal_port_body | E;
 signal_port = direction width signal_name;
 direction = KW_input | KW_output;
-width = SS_open_bracket VL_integer_literal SS_close_bracket | E;
+width = SS_open_bracket VL_integer SS_close_bracket | E;
 signal_name = VL_variable;
 
 module_body = SS_open_brace module_body_list SS_close_brace;
@@ -63,7 +63,7 @@ index_expr = terminal_expr index_tail;
 index_tail = SS_open_bracket expr SS_close_bracket | E;
 
 terminal_expr = SS_open_parenthesis expr SS_close_parenthesis |
-                VL_integer_literal |
+                VL_sized_number | VL_integer |
                 VL_variable;
 
 unary_op = OP_and | OP_or | OP_negate | OP_xor;

@@ -461,66 +461,9 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
     return null;
 }
 
-//test "RuleEnum: Stuff gets loaded" {
-//    const rule_names = [_]RuleEnum {.module, .module_name, .control_ports, .control_port_body, .control_port_list, .control_port, .signal_ports,
-//    .signal_port_body, .signal_port_list, .signal_port, .direction, .width, .signal_name,
-//    .module_body, .module_body_list, .module_body_item, .declaration, .signal_name_list,
-//    .block, .block_type, .block_body, .statement_list, .statement,
-//    .if_statement, .assignment_statement, .expr, .expr_tail, .atom_follow,
-//    .atomic_expr, .unary_op, .binary_op, .instantiation, .signal_connection_body, .signal_connection_list,
-//    .signal_connection};
-//
-//    try std.testing.expectEqual(rule_names.len, @typeInfo(RuleEnum).@"enum".fields.len);
-//    inline for (rule_names, 0..) |r,i| {
-//        try std.testing.expectEqual(r, @as(RuleEnum,@enumFromInt(@typeInfo(RuleEnum).@"enum".fields[i].value)));
-//    }
-//}
-//
-//test "Alternatives" {
-//    try std.testing.expectEqual(68, RuleCount);
-//    try std.testing.expectEqual(35, NonTerminalCount);
-//    try std.testing.expectEqual(9, MaxAlternativeCount);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{0, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{1, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_name)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{2,    3,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_ports)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{4, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_port_body)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{5,    6,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_port_list)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{7,    8,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.control_port)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{9, null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_ports)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{10,  11,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_port_body)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{12,  13,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_port_list)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{14,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_port)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{15,  16,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.direction)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{17,  18,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.width)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{19,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_name)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{20,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_body)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{21,  22,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_body_list)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{23,  24,  25,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.module_body_item)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{26,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.declaration)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{27,  28,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_name_list)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{29,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.block)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{30,  31,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.block_type)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{32,  33,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.block_body)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{34,  35,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.statement_list)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{36,  37,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.statement)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{38,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.if_statement)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{39,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.assignment_statement)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{40,  41,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.expr)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{42,  43,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.expr_tail)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{44,  45,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.atom_follow)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{46,  47,  48,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.atomic_expr)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{49,  50,  51,  52,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.unary_op)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{53,  54,  55,  56,  57,  58,  59,  60,  61}, &AlternativeTable[@intFromEnum(RuleEnum.binary_op)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{62,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.instantiation)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{63,  64,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_connection_body)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{65,  66,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_connection_list)]);
-//    try std.testing.expectEqualSlices(?u16, &[_]?u16{67,null,null,null,null,null,null,null,null}, &AlternativeTable[@intFromEnum(RuleEnum.signal_connection)]);
-//}
-
 test "Gen Parse Table" {
     var first_sets = try constructFirstSets(std.testing.allocator);
     defer first_sets.deinit();
-
 
     var follow_sets = try constructFollowSets(&first_sets, std.testing.allocator);
     defer follow_sets.deinit();
@@ -580,9 +523,63 @@ test "Module Bad Parses" {
 }
 
 test "Block" {
-    testing.log_level = .debug; //Don't print errors for bad inputs
     try testing.expectEqual(null, try runParseTest( "proc x = y;", .{ .rule = .block }));
     try testing.expectEqual(null, try runParseTest( "comb x = y;", .{ .rule = .block }));
     try testing.expectEqual(null, try runParseTest( "proc {x = y;\nif &a {x = x << x;}}", .{ .rule = .block }));
 }
 
+test "Declaration" {
+    try testing.expectEqual(null, try runParseTest( "signal a;", .{ .rule = .declaration }));
+    try testing.expectEqual(null, try runParseTest( "signal a, b, c;", .{ .rule = .declaration }));
+    try testing.expectEqual(null, try runParseTest( "signal [5] a;", .{ .rule = .declaration }));
+}
+
+test "Instantiation" {
+    try testing.expectEqual(null, try runParseTest( "modulname i_modulename ();", .{ .rule = .instantiation }));
+    try testing.expectEqual(null, try runParseTest( "modulname i_modulename (.clk(clk), .sig(sig3));", .{ .rule = .instantiation }));
+}
+
+test "Full Module" {
+    const mod =
+\\module fifo [+clk,-resetn] (
+\\  input valid_up,
+\\  output enable_up,
+\\  input [8] data_up,
+\\
+\\  output valid_down,
+\\  input enable_down,
+\\  output [8] data_down,
+\\) {
+\\  signal [4] read_ptr, write_ptr;
+\\  signal [4] read_ptr_next, write_ptr_next;
+\\  signal do_read, do_write;
+\\  signal empty, full;
+\\  
+\\  proc {
+\\      read_ptr = read_ptr_next;
+\\      write_ptr = write_ptr_next;
+\\  }
+\\
+\\  comb empty = read_ptr == write_ptr;
+\\  comb valid_down = ~empty;
+\\  comb do_read = valid_down & enable_down;
+\\
+\\  comb full = ((read_ptr & 4'b0111) == (write_ptr & 4'b0111)) & (read_ptr[3] ^ write_ptr[3]);
+\\  comb enable_up = ~full;
+\\  comb do_write = valid_up & enable_up;
+\\
+\\  comb {
+\\      read_ptr_next = read_ptr;
+\\      write_ptr_next = write_ptr;
+\\      if (do_read) {
+\\          read_ptr_next = read_ptr + 1'b1;
+\\      }
+\\      if (do_write) {
+\\          write_ptr_next = write_ptr + 1'b1;
+\\      }
+\\  }
+\\
+\\}
+;
+    try testing.expectEqual(null, try runParseTest(mod, .{ .rule = .module }));
+}
