@@ -569,6 +569,7 @@ test "Module Good Parses" {
     testing.log_level = .info; //Don't print errors for bad inputs
     try testing.expectEqual(null, try runParseTest( "module mymodule [+clk] () {}", .{ .rule = .module }));
     try testing.expectEqual(null, try runParseTest( "module mymodule [+clk,-resetn] () {}", .{ .rule = .module }));
+    try testing.expectEqual(null, try runParseTest( "module mymodule [+clk,+clk,+clk] () {}", .{ .rule = .module })); //Semantically might not be right, but syntactically fine
 }
 
 test "Module Bad Parses" {
@@ -576,4 +577,7 @@ test "Module Bad Parses" {
     try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module })); //error keywork as name
     try testing.expectEqual(3, try runParseTest( "module mymodule [] () {}", .{ .rule = .module })); //[] needs at least one value within
     try testing.expectEqual(3, try runParseTest( "module mymodule [clk] () {}", .{ .rule = .module })); //terms in [] need +- signifiers
+    try testing.expectEqual(3, try runParseTest( "module mymodule [^clk] () {}", .{ .rule = .module })); //terms in [] need +- signifiers
 }
+
+
