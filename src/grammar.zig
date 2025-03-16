@@ -368,9 +368,12 @@ fn constructParseTable(first_sets: *RuleTokenSet, follow_sets: *RuleTokenSet, al
                 const first_has = first.contains(token);
                 const follow_has = first.contains(.PR_EMPTY) and follow.contains(token); 
                 if (first_has or follow_has) {
-                    log.info("Parse Table: Entry set for rule {s} token {s}. First set present: {}. Follow set present: {}", .{@tagName(rule),@tagName(token),first_has,follow_has});
+                    log.debug("Parse Table: Entry set for rule {s} token {s}. First set present: {}. Follow set present: {}", .{@tagName(rule),@tagName(token),first_has,follow_has});
                     //This should be an LL(1) grammar, if there has already been an entry then there is a bug in the parser or the grammar itself
-                    std.debug.assert(table[non_terminal_index][token_index] == null);
+                    if (table[non_terminal_index][token_index] != null) {
+                        log.err("Grammar is ambiguous, for rule {s} token {s} can lead to multiple productions.", .{@tagName(rule),@tagName(token)});
+                        unreachable;
+                    }
                     table[non_terminal_index][token_index] = alternative;
                 }
             }
@@ -391,8 +394,8 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
         const next_input_token = if (index < tokens.size) tokens.tokens[index] else .PR_EMPTY;
         const next_stack_element = stack.popOrNull() orelse unreachable;
         switch (next_stack_element) {
-            .rule => |r2| log.info("Popped {s}", .{@tagName(r2)}),
-            .token => |t2| log.info("Popped {s}", .{@tagName(t2)}),
+            .rule => |r2| log.debug("Popped {s}", .{@tagName(r2)}),
+            .token => |t2| log.debug("Popped {s}", .{@tagName(t2)}),
         }
 
         switch (next_stack_element) {
@@ -408,11 +411,11 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
                 if (t == next_input_token) {
                     //Matching
                     index += 1;
-                    log.info("Matched token {s}", .{@tagName(t)});
+                    log.debug("Matched token {s}", .{@tagName(t)});
                     continue;
                 } else {
                     //mismatching
-                    log.err("Saw unexpected token {s} at index {}. Expected token {s}.", .{@tagName(next_input_token),index,@tagName(t)});
+                    log.debug("Saw unexpected token {s} at index {}. Expected token {s}.", .{@tagName(next_input_token),index,@tagName(t)});
                     return index;
                 }
             },
@@ -432,8 +435,8 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
                         else => {},
                     }
                     switch (next_element) {
-                        .rule => |r2| log.info("For {s} push {s}", .{@tagName(r),@tagName(r2)}),
-                        .token => |t2| log.info("For {s} push {s}", .{@tagName(r),@tagName(t2)}),
+                        .rule => |r2| log.debug("For {s} push {s}", .{@tagName(r),@tagName(r2)}),
+                        .token => |t2| log.debug("For {s} push {s}", .{@tagName(r),@tagName(t2)}),
                     }
                     try stack.append(next_element);
                 }
@@ -542,18 +545,23 @@ fn runParseTest(inp: []const u8, start_symbol: RuleElement) !?u32 {
     return try parse(table, tokens, start_symbol, testing.allocator);
 }
 
-test "Test Good Parses" {
-    try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
+test "Test Good Expr Parses" {
     try testing.expectEqual(null, try runParseTest( "x+s", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "x+y+z", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "x & 13'b0", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "13'b0 << var", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "13'b0 <= var", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "13'b0 <= var ++ var2 + var3 ", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "var[a]", .{ .rule = .expr }));
 }
     
-test "Test Bad Parses" {
+test "Test Bad Expr Parses" {
     testing.log_level = .err; //Don't print errors for bad inputs
-    try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module }));
     try testing.expectEqual(2, try runParseTest( "13'b0 <<", .{ .rule = .expr }));
+    try testing.expectEqual(4, try runParseTest( "var[a][b]", .{ .rule = .expr })); //Multidimensional arrays not supported
+}
+
+test "Module parse" {
+    try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
+    try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module }));
 }
