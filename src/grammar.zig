@@ -377,17 +377,20 @@ fn constructParseTable(first_sets: *RuleTokenSet, follow_sets: *RuleTokenSet, al
     return table;
 }
 
-fn parse(table: *ParseTable, tokens: TokenBuffer, alloc: std.mem.Allocator) !?u32 {
+fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, alloc: std.mem.Allocator) !?u32 {
     var stack = std.ArrayList(RuleElement).init(alloc);
     defer stack.deinit();
     try stack.append(.{ .token = .PR_END });
-    try stack.append(.{ .rule = .module });
+    try stack.append(start_symbol);
 
     var index: u32 = 0;
     while (index < tokens.size) {
         const next_input_token = tokens.tokens[index];
         const next_stack_element = stack.popOrNull() orelse unreachable;
-        log.info("Popped {s}.", .{@tagName(next_stack_element)});
+        switch (next_stack_element) {
+            .rule => |r2| log.info("Popped {s}", .{@tagName(r2)}),
+            .token => |t2| log.info("Popped {s}", .{@tagName(t2)}),
+        }
 
         if (next_input_token == .PR_END) {
             log.err("Reached end of parse stack but still see input tokens. Next observed token is {s}, index {}", .{@tagName(next_input_token),index});
@@ -416,7 +419,14 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, alloc: std.mem.Allocator) !?u3
                 while (term_index > 0) {
                     term_index -= 1;
                     const next_element = rule.terms[term_index] orelse undefined;
-                    log.info("For {s} push {s}", .{@tagName(r),@tagName(next_element)});
+                    switch (next_element) {
+                        .token => |t2| if (t2 == .PR_EMPTY) continue,
+                        else => {},
+                    }
+                    switch (next_element) {
+                        .rule => |r2| log.info("For {s} push {s}", .{@tagName(r),@tagName(r2)}),
+                        .token => |t2| log.info("For {s} push {s}", .{@tagName(r),@tagName(t2)}),
+                    }
                     try stack.append(next_element);
                 }
             }
@@ -495,17 +505,31 @@ test "Gen Parse Table" {
     defer std.testing.allocator.destroy(table);
 }
 
-test "Test Parse" {
+
+fn tableForTesting() !*ParseTable {
     var first_sets = try constructFirstSets(testing.allocator); defer first_sets.deinit();
     var follow_sets = try constructFollowSets(&first_sets, testing.allocator); defer follow_sets.deinit();
-    const table = try constructParseTable(&first_sets, &follow_sets, testing.allocator); defer testing.allocator.destroy(table);
+    const table = try constructParseTable(&first_sets, &follow_sets, testing.allocator);
 
-    
-    testing.log_level = .info;
+    return table;
+}
+
+fn runParseTest(inp: []const u8, start_symbol: RuleElement) !?u32 {
+    const table = try tableForTesting(); defer testing.allocator.destroy(table);
     var tokens = try TokenBuffer.init(1024, testing.allocator); defer tokens.deinit();
-    const test_inp = "module mymodule () {}";
-    try testing.expectEqual(test_inp.len, try tokeniser.tokenise(test_inp, &tokens));
-    try testing.expectEqual(null, try parse(table, tokens, testing.allocator));
+    try testing.expectEqual(inp.len, try tokeniser.tokenise(inp, &tokens));
+    return try parse(table, tokens, start_symbol, testing.allocator);
+}
+
+test "Test Good Parses" {
+    try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
+
+
+}
+    
+test "Test Bad Parses" {
+    testing.log_level = .err; //Don't print errors for bad inputs
+    try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module }));
 }
 
 //test "Debug: print rules" {
