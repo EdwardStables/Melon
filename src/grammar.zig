@@ -145,7 +145,7 @@ const Rule = struct {
     terms: [MaxTermCount]?RuleElement,
     term_count: u8,
     fn make() Rule {
-        return .{.terms=.{null,null,null,null,null,null,null}, .term_count=0};
+        return .{.terms=.{null,null,null,null,null,null}, .term_count=0};
     }
     fn add(self: *Rule, elem: RuleElement) void {
         if (elem == .token and elem.token == .PR_EMPTY) std.debug.assert(self.term_count == 0); //Can only have a single term if empty
@@ -365,7 +365,10 @@ fn constructParseTable(first_sets: *RuleTokenSet, follow_sets: *RuleTokenSet, al
                     .rule => |r| first_sets.get(r) orelse unreachable,
                 };
 
-                if (first.contains(token) or (first.contains(.PR_EMPTY) and follow.contains(token))) {
+                const first_has = first.contains(token);
+                const follow_has = first.contains(.PR_EMPTY) and follow.contains(token); 
+                if (first_has or follow_has) {
+                    log.info("Parse Table: Entry set for rule {s} token {s}. First set present: {}. Follow set present: {}", .{@tagName(rule),@tagName(token),first_has,follow_has});
                     //This should be an LL(1) grammar, if there has already been an entry then there is a bug in the parser or the grammar itself
                     std.debug.assert(table[non_terminal_index][token_index] == null);
                     table[non_terminal_index][token_index] = alternative;
@@ -401,6 +404,7 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
                 if (t == next_input_token) {
                     //Matching
                     index += 1;
+                    log.info("Matched token {s}", .{@tagName(t)});
                     continue;
                 } else {
                     //mismatching
@@ -523,8 +527,9 @@ fn runParseTest(inp: []const u8, start_symbol: RuleElement) !?u32 {
 
 test "Test Good Parses" {
     try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
-
-
+    try testing.expectEqual(null, try runParseTest( "x+s", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "x & 13'b0", .{ .rule = .expr }));
+    //try testing.expectEqual(null, try runParseTest( "13'b0 << var", .{ .rule = .expr }));
 }
     
 test "Test Bad Parses" {
