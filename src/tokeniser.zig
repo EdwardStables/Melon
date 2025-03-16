@@ -68,6 +68,10 @@ pub const Token = enum {
     OP_xor,
     OP_negate,
     OP_equals,
+    OP_gt,
+    OP_lt,
+    OP_gte,
+    OP_lte,
 
     //Valued,
     VL_variable, // a-zA-Z0-9_
@@ -152,7 +156,7 @@ pub const TokenBuffer = struct {
 
 fn isSingleCharacterToken(c: u8) bool {
     return switch (c) {
-        '{', '}', '[', ']', '(', ')', ';', '=', '+', '-', '&', '|', '^', '~', '#' => true,
+        '{', '}', '[', ']', '(', ')', ';', '=', '<', '>', '+', '-', '&', '|', '^', '~', '#' => true,
         else => false,
     };
 }
@@ -391,6 +395,29 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenBuffer) !u32 {
                         try token_buffer.addToken(loc, .OP_add);
                     }
                 },
+                '<' => {
+                    if (c_n != null and c_n.? == '<') {
+                        try token_buffer.addToken(loc, .OP_lsl);
+                        state = .Skip;
+                    }
+                    else if (c_n != null and c_n.? == '=') {
+                        try token_buffer.addToken(loc, .OP_lte);
+                        state = .Skip;
+                    } else {
+                        try token_buffer.addToken(loc, .OP_lt);
+                    }
+                },
+                '>' => {
+                    if (c_n != null and c_n.? == '>') {
+                        try token_buffer.addToken(loc, .OP_lsr);
+                        state = .Skip;
+                    } else if (c_n != null and c_n.? == '=') {
+                        try token_buffer.addToken(loc, .OP_gte);
+                        state = .Skip;
+                    } else {
+                        try token_buffer.addToken(loc, .OP_gt);
+                    }
+                },
                 '-' => try token_buffer.addToken(loc, .OP_subtract),
                 '&' => try token_buffer.addToken(loc, .OP_and),
                 '|' => try token_buffer.addToken(loc, .OP_or),
@@ -564,11 +591,13 @@ test "Tokeniser: mix of tokens" {
 }
 
 test "Tokeniser: special case tokens" {
-    const inp = "abc = a ++ b == c;"; //Not valid code, but does include special case operators
+    const inp = "++ + == = << <= < >> >= >"; //Not valid code, but does include special case operators
     
-    const exp_tok = [_]Token{.VL_variable, .SS_assign, .VL_variable, .OP_concat, .VL_variable, .OP_equals, .VL_variable, .SS_semi_colon};
-    const exp_var = [_]?[]const u8{"abc",null,"a",null,"b",null,"c",null};
-    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null,null,null};
+    const exp_tok = [_]Token{.OP_concat, .OP_add, .OP_equals, .SS_assign,
+                             .OP_lsl, .OP_lte, .OP_lt,
+                             .OP_lsr, .OP_gte, .OP_gt};
+    const exp_var = [_]?[]const u8{null,null,null,null,null,null,null,null,null,null};
+    const exp_val = [_]?IntegerWithWidth{null,null,null,null,null,null,null,null,null,null};
     try expectEqualTokens(inp, &exp_tok, &exp_var, &exp_val);
 }
 
