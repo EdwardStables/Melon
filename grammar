@@ -34,25 +34,30 @@ assignment_statement = VL_variable SS_assign expr SS_semi_colon;
 
 expr = add_expr;
 add_expr = bitw_expr add_tail;
-add_tail = OP_add bitw_expr |
-           OP_subtract bitw_expr |
+add_tail = OP_add add_expr |
+           OP_subtract add_expr |
            E;
 bitw_expr = shift_expr bitw_tail;
-bitw_tail = OP_and shift_expr |
-            OP_or shift_expr |
-            OP_xor shift_expr |
+bitw_tail = OP_and bitw_expr |
+            OP_or bitw_expr |
+            OP_xor bitw_expr |
             E;
 shift_expr = concat_expr shift_tail;
-shift_tail = OP_lsl concat_expr |
-             OP_lsr concat_expr |
+shift_tail = OP_lsl shift_expr |
+             OP_lsr shift_expr |
              E;
 concat_expr = index_expr concat_tail;
-concat_tail = OP_concat index_expr |
+concat_tail = OP_concat concat_expr |
               E;
 index_expr = SS_open_bracket expr SS_close_bracket |
-             equals_expr;
-equals_expr = OP_equals terminal_expr |
-              terminal_expr;
+             comp_expr;
+comp_expr = terminal_expr comp_tail;
+comp_tail = OP_equals comp_expr |
+            OP_lt comp_expr |
+            OP_lte comp_expr |
+            OP_gt comp_expr |
+            OP_gte comp_expr |
+            E;
 terminal_expr = SS_open_parenthesis expr SS_close_parenthesis |
                 VL_integer_literal |
                 VL_variable;

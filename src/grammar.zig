@@ -528,8 +528,11 @@ fn runParseTest(inp: []const u8, start_symbol: RuleElement) !?u32 {
 test "Test Good Parses" {
     try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
     try testing.expectEqual(null, try runParseTest( "x+s", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "x+y+z", .{ .rule = .expr }));
     try testing.expectEqual(null, try runParseTest( "x & 13'b0", .{ .rule = .expr }));
-    //try testing.expectEqual(null, try runParseTest( "13'b0 << var", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "13'b0 << var", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "13'b0 <= var", .{ .rule = .expr }));
+    try testing.expectEqual(null, try runParseTest( "13'b0 <= var ++ var2 + var3 ", .{ .rule = .expr }));
 }
     
 test "Test Bad Parses" {
