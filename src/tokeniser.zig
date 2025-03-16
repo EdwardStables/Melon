@@ -156,7 +156,7 @@ pub const TokenBuffer = struct {
 
 fn isSingleCharacterToken(c: u8) bool {
     return switch (c) {
-        '{', '}', '[', ']', '(', ')', ';', '=', '<', '>', '+', '-', '&', '|', '^', '~', '#' => true,
+        ',','{', '}', '[', ']', '(', ')', ';', '=', '<', '>', '+', '-', '&', '|', '^', '~', '#' => true,
         else => false,
     };
 }
@@ -374,6 +374,7 @@ pub fn tokenise(input_buffer: [] const u8, token_buffer: *TokenBuffer) !u32 {
             switch (c) {
                 '{' => try token_buffer.addToken(loc, .SS_open_brace),
                 '}' => try token_buffer.addToken(loc, .SS_close_brace),
+                ',' => try token_buffer.addToken(loc, .SS_comma),
                 '[' => try token_buffer.addToken(loc, .SS_open_bracket),
                 ']' => try token_buffer.addToken(loc, .SS_close_bracket),
                 '(' => try token_buffer.addToken(loc, .SS_open_parenthesis),

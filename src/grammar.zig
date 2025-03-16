@@ -564,7 +564,16 @@ test "Test Bad Expr Parses" {
     try testing.expectEqual(3, try runParseTest( "^x- -y+z", .{ .rule = .expr }));
 }
 
-test "Module parse" {
+test "Module Good Parses" {
     try testing.expectEqual(null, try runParseTest( "module mymodule () {}", .{ .rule = .module }));
-    try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module }));
+    testing.log_level = .info; //Don't print errors for bad inputs
+    try testing.expectEqual(null, try runParseTest( "module mymodule [+clk] () {}", .{ .rule = .module }));
+    try testing.expectEqual(null, try runParseTest( "module mymodule [+clk,-resetn] () {}", .{ .rule = .module }));
+}
+
+test "Module Bad Parses" {
+    testing.log_level = .err; //Don't print errors for bad inputs
+    try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module })); //error keywork as name
+    try testing.expectEqual(3, try runParseTest( "module mymodule [] () {}", .{ .rule = .module })); //[] needs at least one value within
+    try testing.expectEqual(3, try runParseTest( "module mymodule [clk] () {}", .{ .rule = .module })); //terms in [] need +- signifiers
 }
