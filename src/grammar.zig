@@ -387,16 +387,20 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
     try stack.append(start_symbol);
 
     var index: u32 = 0;
-    while (index < tokens.size) {
-        const next_input_token = tokens.tokens[index];
+    while (index < tokens.size or stack.items.len > 1) {
+        const next_input_token = if (index < tokens.size) tokens.tokens[index] else .PR_EMPTY;
         const next_stack_element = stack.popOrNull() orelse unreachable;
         switch (next_stack_element) {
             .rule => |r2| log.info("Popped {s}", .{@tagName(r2)}),
             .token => |t2| log.info("Popped {s}", .{@tagName(t2)}),
         }
 
-        if (next_input_token == .PR_END) {
-            log.err("Reached end of parse stack but still see input tokens. Next observed token is {s}, index {}", .{@tagName(next_input_token),index});
+        switch (next_stack_element) {
+            .token => |t| if (t == .PR_END) {
+                log.err("Reached end of parse stack but still see input tokens. Next observed token is {s}, index {}", .{@tagName(next_input_token),index});
+                return index;
+            },
+            else => {}
         }
 
         switch (next_stack_element) {
@@ -435,6 +439,19 @@ fn parse(table: *ParseTable, tokens: TokenBuffer, start_symbol: RuleElement, all
                 }
             }
         }
+    }
+
+    if (stack.items.len > 1) {
+        log.err("Input tokens all consumed but parse stack has {} remaning symbols:", .{stack.items.len-1});
+        var stack_index = stack.items.len;
+        while (stack_index > 0) {
+            stack_index -= 1;
+            switch (stack.items[stack_index]) {
+                .rule => |r| log.info("{s}", .{@tagName(r)}),
+                .token => |t| log.info("{s}", .{@tagName(t)}),
+            }
+        }
+        return index;
     }
 
     //Success
@@ -538,30 +555,5 @@ test "Test Good Parses" {
 test "Test Bad Parses" {
     testing.log_level = .err; //Don't print errors for bad inputs
     try testing.expectEqual(1, try runParseTest( "module module () {}", .{ .rule = .module }));
+    try testing.expectEqual(2, try runParseTest( "13'b0 <<", .{ .rule = .expr }));
 }
-
-//test "Debug: print rules" {
-//    rules: for (0..RuleCount) |i| {
-//        std.debug.print("{s}\n", .{@tagName(@as(RuleEnum, @enumFromInt(i)))});
-//        for (0..MaxAlternativeCount) |j| {
-//            terms: for (0..MaxTermCount) |k| {
-//                if (Rules[i][j] == null) continue :rules;
-//                if (Rules[i][j]) |r| {
-//                    if (!r.empty and k >= Rules[i][j].?.term_count) break :terms;
-//                    if (r.empty) {
-//                        std.debug.print("   E", .{});
-//                        break :terms;
-//                    } else {
-//                        std.debug.print("   {s} ", .{
-//                            switch(Rules[i][j].?.terms[k].?) {
-//                                .token => |t| @tagName(t),
-//                                .rule => |t| @tagName(t),
-//                            }
-//                        });
-//                    }
-//                } 
-//            }
-//            std.debug.print("\n",.{});
-//        }
-//    }
-//}
