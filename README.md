@@ -1,8 +1,8 @@
-# Toy Logic Sim
+# Melon
 
-This is just a little project to do logic simulation for a simple gate level simluation style language. The simulation is cycle based, meaning it is not quite as accurate to reality as a more fully featured Verilog simulator, and cannot correctly handle things like CDC logic, that is beyond the scope of this project.
+Melon is a compiler and simulator for a simple HDL language for "normal" RTL design. The compiler can currently target melon's own simulator, and will later support SystemVerilog output.
 
-The language itself takes many ideas from Verilog/SystemVerilog but is significantly simpler. It is intended that this project will either simulate its own logic (suitable for module level/simple system level development), or output functionally identical SystemVerilog.
+Fundamentally this is just a little project to try out Zig for something significant and try doing my own compiler, it's fundamentally a toy. The language itself takes many ideas from Verilog/SystemVerilog but is significantly simpler.
 
 ## Example Programs
 
